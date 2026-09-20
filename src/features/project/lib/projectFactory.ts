@@ -13,12 +13,13 @@ export const createEmptyProject = (): IDEF0Project => {
 
   return {
     id: createId('project'),
-    name: 'Новый IDEF0-проект',
-    version: '1.0.0',
+    name: 'Новый проект',
+    version: '2.0.0',
     rootDiagramId,
     diagrams: [
       {
         id: rootDiagramId,
+        type: 'idef0',
         title: 'Контекстная диаграмма',
         nodeNumber: 'A-0',
         parentDiagramId: null,
@@ -86,6 +87,7 @@ export const createChildDiagram = (
   parentNode: IDEF0Node,
 ): IDEF0Diagram => ({
   id: createId('diagram'),
+  type: 'idef0',
   title: `Декомпозиция ${parentNode.nodeNumber ?? parentNode.name}`,
   nodeNumber: parentNode.nodeNumber ?? 'A0',
   parentDiagramId,

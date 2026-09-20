@@ -1,3 +1,5 @@
+import { CommitInput } from '@/components/CommitInput'
+import { useIdef0Store } from '@/features/diagram/model/useIdef0Store'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { FUNCTION_HANDLES } from '@/entities/idef0/constants'
 import type { FunctionNodeData } from '@/features/diagram/lib/flowMappers'
@@ -23,7 +25,7 @@ export const FunctionNode = ({ data, selected }: NodeProps<FunctionFlowNode>) =>
 
       <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{node.nodeNumber}</div>
       <div className="flex flex-1 items-center justify-center text-center text-sm font-semibold leading-5">
-        {node.name || 'Без имени'}
+        <CommitInput className="nodrag nopan node-name" aria-label="Имя функции" value={node.name} onCommit={name => useIdef0Store.getState().updateNode(node.id, { name })} />
       </div>
       <div className="grid grid-cols-4 gap-1 text-[10px] uppercase text-slate-400">
         <span>Input</span>

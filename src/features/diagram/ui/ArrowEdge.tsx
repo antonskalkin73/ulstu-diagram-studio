@@ -1,4 +1,6 @@
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, type Edge, type EdgeProps } from '@xyflow/react'
+import { CommitInput } from '@/components/CommitInput'
+import { useIdef0Store } from '@/features/diagram/model/useIdef0Store'
+import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type Edge, type EdgeProps } from '@xyflow/react'
 import { ARROW_TYPE_COLORS, ARROW_TYPE_LABELS } from '@/entities/idef0/constants'
 import type { ArrowEdgeData } from '@/features/diagram/lib/flowMappers'
 
@@ -16,13 +18,17 @@ export const ArrowEdge = ({
   selected,
   markerEnd,
 }: EdgeProps<ArrowFlowEdge>) => {
-  const [path, labelX, labelY] = getBezierPath({
+  const [path, labelX, labelY] = getSmoothStepPath({
     sourceX,
     sourceY,
     targetX,
     targetY,
     sourcePosition,
     targetPosition,
+    borderRadius: 0,
+    offset: 30,
+    centerX: (sourceX + targetX) / 2 + (data?.arrow.routeOffset ?? 0),
+    centerY: (sourceY + targetY) / 2 + (data?.arrow.routeOffset ?? 0),
   })
 
   const arrow = data?.arrow
@@ -34,10 +40,10 @@ export const ArrowEdge = ({
       {arrow ? (
         <EdgeLabelRenderer>
           <div
-            className="absolute -translate-x-1/2 -translate-y-1/2 rounded border border-slate-300 bg-white/90 px-2 py-1 text-[11px] font-medium text-slate-700 shadow-sm"
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+            className="nodrag nopan absolute -translate-x-1/2 -translate-y-1/2 rounded border border-slate-300 bg-white/90 px-2 py-1 text-[11px] font-medium text-slate-700 shadow-sm"
+            style={{ pointerEvents: 'all', transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
           >
-            <div>{arrow.label || 'Без подписи'}</div>
+            <CommitInput className="node-name" aria-label="Подпись стрелки на холсте" value={arrow.label} onCommit={label => useIdef0Store.getState().updateArrow(arrow.id, { label })} />
             <div className="text-[10px] uppercase text-slate-400">{ARROW_TYPE_LABELS[arrow.arrowType]}</div>
           </div>
         </EdgeLabelRenderer>

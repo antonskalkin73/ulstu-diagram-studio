@@ -1,3 +1,5 @@
+import { CommitInput } from '@/components/CommitInput'
+import { useIdef0Store } from '@/features/diagram/model/useIdef0Store'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { BOUNDARY_HANDLES, ARROW_TYPE_LABELS } from '@/entities/idef0/constants'
 import type { BoundaryNodeData } from '@/features/diagram/lib/flowMappers'
@@ -28,7 +30,7 @@ export const BoundaryPortNode = ({ data, selected }: NodeProps<BoundaryFlowNode>
         />
       )}
       <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{ARROW_TYPE_LABELS[role]}</div>
-      <div className="text-xs font-medium text-slate-800">{node.name}</div>
+      <CommitInput className="nodrag nopan node-name text-xs font-medium text-slate-800" aria-label="Имя интерфейса" value={node.name} onCommit={name => useIdef0Store.getState().updateNode(node.id, { name })} />
     </div>
   )
 }

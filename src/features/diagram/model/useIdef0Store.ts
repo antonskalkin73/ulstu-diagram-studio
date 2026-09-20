@@ -1,13 +1,13 @@
+import { produce } from 'immer'
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import type { Connection } from '@xyflow/react'
 import { BOUNDARY_HANDLES, FUNCTION_HANDLES } from '@/entities/idef0/constants'
 import { createBoundaryPortNode, createChildDiagram, createEmptyProject, createFunctionNode } from '@/features/project/lib/projectFactory'
-import type { ArrowType, IDEF0Project, ValidationIssue } from '@/types/idef0'
+import type { ArrowType, IDEF0Node, IDEF0Arrow, IDEF0Project, ValidationIssue } from '@/types/idef0'
 import { validateProject } from '@/features/validation/lib/validateProject'
 import { createId } from '@/utils/id'
 import {
-  cloneProject,
   collectChildDiagramIds,
   getArrowTypeFromHandles,
   getDiagramById,
@@ -56,6 +56,13 @@ interface Idef0Store {
   contextMenu: ContextMenuState | null
   past: HistoryEntry[]
   future: HistoryEntry[]
+  addDiagram: () => void
+  deleteDiagram: (id: string) => void
+  clipboard: { nodes: IDEF0Node[]; arrows: IDEF0Arrow[] } | null
+  copySelection: () => void
+  pasteSelection: () => void
+  duplicateSelection: () => void
+  alignSelection: (axis: 'x' | 'y') => void
   setProject: (project: IDEF0Project) => void
   newProject: () => void
   setProjectName: (name: string) => void
@@ -65,7 +72,7 @@ interface Idef0Store {
   addFunctionNode: (position: { x: number; y: number }) => void
   addBoundaryNode: (role: ArrowType, position: { x: number; y: number }) => void
   updateNode: (nodeId: string, patch: Partial<{ name: string; notes: string }>) => void
-  updateArrow: (arrowId: string, patch: Partial<{ label: string }>) => void
+  updateArrow: (arrowId: string, patch: Partial<{ label: string; routeOffset: number }>) => void
   removeElement: (kind: 'node' | 'arrow', id: string) => void
   deleteSelection: () => void
   updateNodePositions: (positions: Array<{ id: string; x: number; y: number }>) => void
@@ -88,33 +95,22 @@ const applyMutation = (
   state: Idef0Store,
   mutator: (draft: DraftState) => void,
 ): Partial<Idef0Store> => {
-  const snapshot: HistoryEntry = {
-    project: cloneProject(state.project),
-    currentDiagramId: state.currentDiagramId,
-  }
-  const draft: DraftState = {
-    project: cloneProject(state.project),
-    currentDiagramId: state.currentDiagramId,
-    selection: cloneProject(state.selection),
-    selectedElement: cloneProject(state.selectedElement),
-  }
-
-  mutator(draft)
-  draft.project.meta.updatedAt = new Date().toISOString()
-
+  const before: DraftState = { project: state.project, currentDiagramId: state.currentDiagramId, selection: state.selection, selectedElement: state.selectedElement }
+  const draft = produce(before, mutator)
+  if (draft === before) return {}
+  const changed = draft.project !== state.project
+  const project = changed ? produce(draft.project, p => { p.meta.updatedAt = new Date().toISOString() }) : state.project
   return {
-    project: draft.project,
-    currentDiagramId: draft.currentDiagramId,
-    selection: draft.selection,
-    selectedElement: draft.selectedElement,
-    issues: buildIssues(draft.project),
+    ...draft, project,
+    issues: changed ? buildIssues(project) : state.issues,
     contextMenu: null,
-    past: [...state.past, snapshot].slice(-100),
-    future: [],
+    past: changed ? [...state.past, { project: state.project, currentDiagramId: state.currentDiagramId }].slice(-100) : state.past,
+    future: changed ? [] : state.future,
   }
 }
 
 export const useIdef0Store = create<Idef0Store>((set, get) => ({
+  clipboard: null,
   project: initialProject,
   currentDiagramId: initialProject.rootDiagramId,
   issues: buildIssues(initialProject),
@@ -123,6 +119,55 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
   contextMenu: null,
   past: [],
   future: [],
+  addDiagram: () => set(state => applyMutation(state, draft => {
+    const diagram = createEmptyProject().diagrams[0]!
+    diagram.title = `Новая модель ${draft.project.diagrams.filter(d => !d.parentDiagramId).length + 1}`
+    draft.project.diagrams.push(diagram)
+    draft.currentDiagramId = diagram.id
+    draft.selection = { nodeIds: [], arrowIds: [] }
+    draft.selectedElement = { kind: 'diagram', id: diagram.id }
+  })),
+  deleteDiagram: (id) => set(state => applyMutation(state, draft => {
+    if (id === draft.project.rootDiagramId) return
+    const removed = new Set(collectChildDiagramIds(draft.project.diagrams, id))
+    draft.project.diagrams = draft.project.diagrams.filter(d => !removed.has(d.id))
+    for (const d of draft.project.diagrams) for (const n of d.nodes) if (n.childDiagramId && removed.has(n.childDiagramId)) n.childDiagramId = null
+    if (removed.has(draft.currentDiagramId)) draft.currentDiagramId = draft.project.rootDiagramId
+    draft.selection = { nodeIds: [], arrowIds: [] }
+    draft.selectedElement = { kind: 'diagram', id: draft.currentDiagramId }
+  })),
+  copySelection: () => {
+    const state = get()
+    const d = getDiagramById(state.project.diagrams, state.currentDiagramId)
+    if (!d) return
+    const nodes = d.nodes.filter(n => state.selection.nodeIds.includes(n.id))
+    if (!nodes.length) return
+    set({ clipboard: structuredClone({ nodes, arrows: d.arrows.filter(a => nodes.some(n => n.id === a.source) && nodes.some(n => n.id === a.target)) }) })
+  },
+  pasteSelection: () => set(state => applyMutation(state, draft => {
+    const d = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+    if (!d || !state.clipboard) return
+    const mapping = new Map<string, string>()
+    for (const n of state.clipboard.nodes) {
+      if (d.isContext && n.kind === 'function' && d.nodes.some(node => node.kind === 'function')) continue
+      const copy = { ...n, id: createId('node'), diagramId: d.id, position: { x: n.position.x + 40, y: n.position.y + 40 }, childDiagramId: null }
+      if (n.kind === 'function') copy.nodeNumber = createFunctionNode(d, undefined, copy.position).nodeNumber
+      mapping.set(n.id, copy.id)
+      d.nodes.push(copy)
+    }
+    for (const a of state.clipboard.arrows) if (mapping.has(a.source) && mapping.has(a.target)) d.arrows.push({ ...a, id: createId('arrow'), source: mapping.get(a.source)!, target: mapping.get(a.target)! })
+    if (!mapping.size) return
+    draft.selection = { nodeIds: [...mapping.values()], arrowIds: [] }
+    draft.selectedElement = { kind: 'node', id: [...mapping.values()][0]! }
+  })),
+  duplicateSelection: () => { if (!get().selection.nodeIds.length) return; get().copySelection(); get().pasteSelection() },
+  alignSelection: (axis) => {
+    const state = get()
+    const nodes = getDiagramById(state.project.diagrams, state.currentDiagramId)?.nodes.filter(n => state.selection.nodeIds.includes(n.id)) ?? []
+    if (nodes.length < 2) return
+    const value = Math.min(...nodes.map(n => n.position[axis]))
+    state.updateNodePositions(nodes.map(n => ({ id: n.id, ...n.position, [axis]: value })))
+  },
   setProject: (project) => {
     set({
       project,
@@ -191,6 +236,8 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     )
   },
   addFunctionNode: (position) => {
+    const active = getDiagramById(get().project.diagrams, get().currentDiagramId)
+    if (active?.isContext && active.nodes.some(n => n.kind === 'function')) return
     set((state) =>
       applyMutation(state, (draft) => {
         const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
@@ -249,6 +296,7 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
           return
         }
 
+        if (typeof patch.routeOffset === 'number') arrow.routeOffset = patch.routeOffset
         if (typeof patch.label === 'string') {
           arrow.label = patch.label
         }
@@ -282,14 +330,21 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     )
   },
   deleteSelection: () => {
-    const { selection, removeElement } = get()
-
-    if (selection.arrowIds.length > 0) {
-      selection.arrowIds.forEach((id) => removeElement('arrow', id))
-      return
-    }
-
-    selection.nodeIds.forEach((id) => removeElement('node', id))
+    if (!get().selection.nodeIds.length && !get().selection.arrowIds.length) return
+    set(state => applyMutation(state, draft => {
+      const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+      if (!diagram) return
+      const selected = new Set(state.selection.nodeIds)
+      const removed = new Set<string>()
+      diagram.nodes.filter(n => selected.has(n.id)).forEach(n => {
+        if (n.childDiagramId) collectChildDiagramIds(draft.project.diagrams, n.childDiagramId).forEach(id => removed.add(id))
+      })
+      diagram.nodes = diagram.nodes.filter(n => !selected.has(n.id))
+      diagram.arrows = diagram.arrows.filter(a => !selected.has(a.source) && !selected.has(a.target) && !state.selection.arrowIds.includes(a.id))
+      draft.project.diagrams = draft.project.diagrams.filter(d => !removed.has(d.id))
+      draft.selection = { nodeIds: [], arrowIds: [] }
+      draft.selectedElement = { kind: 'diagram', id: draft.currentDiagramId }
+    }))
   },
   updateNodePositions: (positions) => {
     set((state) =>
@@ -302,7 +357,7 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
         positions.forEach(({ id, x, y }) => {
           const node = getNodeById(diagram, id)
           if (node) {
-            node.position = { x, y }
+            if (node.position.x !== x || node.position.y !== y) node.position = { x, y }
           }
         })
       }),
@@ -376,6 +431,8 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     )
   },
   setSelection: (selection) => {
+    const previous = get().selection
+    if (previous.nodeIds.join('|') === selection.nodeIds.join('|') && previous.arrowIds.join('|') === selection.arrowIds.join('|')) return
     const currentDiagramId = get().currentDiagramId
     const selectedElement = selection.nodeIds[0]
       ? { kind: 'node' as const, id: selection.nodeIds[0] }
@@ -415,7 +472,7 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     }
 
     const current: HistoryEntry = {
-      project: cloneProject(state.project),
+      project: state.project,
       currentDiagramId: state.currentDiagramId,
     }
 
@@ -438,7 +495,7 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     }
 
     const current: HistoryEntry = {
-      project: cloneProject(state.project),
+      project: state.project,
       currentDiagramId: state.currentDiagramId,
     }
 

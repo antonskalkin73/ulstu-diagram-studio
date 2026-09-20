@@ -1,126 +1,34 @@
-import { GitBranch, Layers3, PlusSquare } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
 import type { IDEF0Diagram } from '@/types/idef0'
 
-interface LeftSidebarProps {
-  diagrams: IDEF0Diagram[]
-  currentDiagramId: string
-  onNavigate: (diagramId: string) => void
-  onAddFunction: () => void
-  onAddInput: () => void
-  onAddControl: () => void
-  onAddOutput: () => void
-  onAddMechanism: () => void
-  snapToGrid: boolean
-  showMiniMap: boolean
-  onToggleSnapToGrid: () => void
-  onToggleMiniMap: () => void
-}
-
-const DiagramTreeItem = ({
-  diagram,
-  depth,
-  diagrams,
-  currentDiagramId,
-  onNavigate,
-}: {
-  diagram: IDEF0Diagram
-  depth: number
-  diagrams: IDEF0Diagram[]
-  currentDiagramId: string
-  onNavigate: (diagramId: string) => void
-}) => {
-  const children = diagrams.filter((item) => item.parentDiagramId === diagram.id)
-
-  return (
-    <div>
-      <button
-        className={`flex w-full items-start rounded-lg px-3 py-2 text-left text-sm transition hover:bg-slate-100 ${
-          diagram.id === currentDiagramId ? 'bg-blue-50 text-blue-700' : 'text-slate-700'
-        }`}
-        style={{ paddingLeft: `${depth * 16 + 12}px` }}
-        onClick={() => onNavigate(diagram.id)}
-      >
-        <span>
-          <span className="block font-medium">{diagram.title}</span>
-          <span className="text-xs text-slate-400">{diagram.nodeNumber}</span>
-        </span>
+function TreeItem({ diagram, diagrams, activeId, onOpen, onDelete, rootId }: {
+  diagram: IDEF0Diagram; diagrams: IDEF0Diagram[]; activeId: string; rootId: string;
+  onOpen: (id: string) => void; onDelete: (id: string) => void
+}) {
+  const [expanded, setExpanded] = useState(true)
+  const children = diagrams.filter(d => d.parentDiagramId === diagram.id)
+  return <li>
+    <div className={`tree-row ${activeId === diagram.id ? 'active' : ''}`}>
+      <button className="tree-chevron" aria-label={expanded ? 'Свернуть ветку' : 'Развернуть ветку'} onClick={() => setExpanded(!expanded)} disabled={!children.length}>
+        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
-      {children.map((child) => (
-        <DiagramTreeItem
-          key={child.id}
-          diagram={child}
-          depth={depth + 1}
-          diagrams={diagrams}
-          currentDiagramId={currentDiagramId}
-          onNavigate={onNavigate}
-        />
-      ))}
+      <button className="tree-title" onClick={() => onOpen(diagram.id)} title={diagram.title}>
+        <span>{diagram.title}</span><small>{diagram.nodeNumber} · IDEF0</small>
+      </button>
+      {diagram.id !== rootId && <button className="tree-delete" aria-label={`Удалить ${diagram.title}`} onClick={() => onDelete(diagram.id)}><Trash2 size={13} /></button>}
     </div>
-  )
+    {expanded && children.length > 0 && <ul>{children.map(child => <TreeItem key={child.id} diagram={child} diagrams={diagrams} activeId={activeId} onOpen={onOpen} onDelete={onDelete} rootId={rootId} />)}</ul>}
+  </li>
 }
-
-const quickActionClassName = 'rounded-lg border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50'
-
-export const LeftSidebar = ({
-  diagrams,
-  currentDiagramId,
-  onNavigate,
-  onAddFunction,
-  onAddInput,
-  onAddControl,
-  onAddOutput,
-  onAddMechanism,
-  snapToGrid,
-  showMiniMap,
-  onToggleSnapToGrid,
-  onToggleMiniMap,
-}: LeftSidebarProps) => (
-  <aside className="flex h-full min-h-0 flex-col gap-4 overflow-hidden rounded-2xl border border-line bg-panel p-4 shadow-panel">
-    <section className="min-h-0 flex-1">
-      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
-        <GitBranch className="h-4 w-4" /> Дерево диаграмм
-      </div>
-      <div className="h-full overflow-auto rounded-xl bg-slate-50 p-2">
-        {diagrams
-          .filter((diagram) => diagram.parentDiagramId === null)
-          .map((diagram) => (
-            <DiagramTreeItem
-              key={diagram.id}
-              diagram={diagram}
-              depth={0}
-              diagrams={diagrams}
-              currentDiagramId={currentDiagramId}
-              onNavigate={onNavigate}
-            />
-          ))}
-      </div>
-    </section>
-
-    <section>
-      <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
-        <PlusSquare className="h-4 w-4" /> Быстрые действия
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <button className={quickActionClassName} onClick={onAddFunction}>Function</button>
-        <button className={quickActionClassName} onClick={onAddInput}>Input</button>
-        <button className={quickActionClassName} onClick={onAddControl}>Control</button>
-        <button className={quickActionClassName} onClick={onAddOutput}>Output</button>
-        <button className={quickActionClassName} onClick={onAddMechanism}>Mechanism</button>
-      </div>
-    </section>
-
-    <section className="rounded-xl bg-slate-50 p-3">
-      <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
-        <Layers3 className="h-4 w-4" /> Опции canvas
-      </div>
-      <label className="flex items-center justify-between gap-3 py-2 text-sm text-slate-600">
-        <span>Snap to grid</span>
-        <input type="checkbox" checked={snapToGrid} onChange={onToggleSnapToGrid} />
-      </label>
-      <label className="flex items-center justify-between gap-3 py-2 text-sm text-slate-600">
-        <span>Миникарта</span>
-        <input type="checkbox" checked={showMiniMap} onChange={onToggleMiniMap} />
-      </label>
-    </section>
+export function LeftSidebar({ diagrams, activeId, rootId, onOpen, onAdd, onDelete }: {
+  diagrams: IDEF0Diagram[]; activeId: string; rootId: string;
+  onOpen: (id: string) => void; onAdd: () => void; onDelete: (id: string) => void
+}) {
+  return <aside className="project-tree" aria-label="Дерево диаграмм">
+    <div className="section-heading">Диаграммы <span>{diagrams.length}</span></div>
+    <button className="add-diagram" onClick={onAdd}><Plus size={15} /> Добавить диаграмму</button>
+    <ul className="tree">{diagrams.filter(d => !d.parentDiagramId).map(d => <TreeItem key={d.id} diagram={d} diagrams={diagrams} activeId={activeId} rootId={rootId} onOpen={onOpen} onDelete={onDelete} />)}</ul>
+    <div className="tree-hint">Дважды нажмите на блок, чтобы открыть его декомпозицию.</div>
   </aside>
-)
+}

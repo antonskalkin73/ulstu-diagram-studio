@@ -153,7 +153,7 @@ export const downloadBlob = (blob: Blob, fileName: string): void => {
   link.href = url
   link.download = fileName
   link.click()
-  URL.revokeObjectURL(url)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 export const downloadTextFile = (content: string, fileName: string, mimeType: string): void => {

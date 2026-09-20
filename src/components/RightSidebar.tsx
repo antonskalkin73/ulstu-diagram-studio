@@ -1,14 +1,10 @@
-import { AlertTriangle, ArrowRightLeft, Box, GitBranchPlus } from 'lucide-react'
+import { CommitInput } from './CommitInput'
+import { ArrowRightLeft, Box, GitBranchPlus } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { ARROW_TYPE_LABELS } from '@/entities/idef0/constants'
 import { useCurrentDiagram, useIdef0Store } from '@/features/diagram/model/useIdef0Store'
-import type { ValidationIssue } from '@/types/idef0'
 
-interface RightSidebarProps {
-  issues: ValidationIssue[]
-}
-
-export const RightSidebar = ({ issues }: RightSidebarProps) => {
+export const RightSidebar = () => {
   const diagram = useCurrentDiagram()
   const { selectedElement, updateNode, updateArrow, updateDiagramTitle, openDecomposition } = useIdef0Store(
     useShallow((state) => ({
@@ -24,10 +20,9 @@ export const RightSidebar = ({ issues }: RightSidebarProps) => {
     selectedElement?.kind === 'node' ? diagram?.nodes.find((node) => node.id === selectedElement.id) : undefined
   const selectedArrow =
     selectedElement?.kind === 'arrow' ? diagram?.arrows.find((arrow) => arrow.id === selectedElement.id) : undefined
-  const diagramIssues = diagram ? issues.filter((issue) => issue.diagramId === diagram.id) : []
 
   return (
-    <aside className="flex h-full min-h-0 flex-col gap-4 rounded-2xl border border-line bg-panel p-4 shadow-panel">
+    <aside className="inspector" aria-label="Свойства">
       <section className="rounded-xl border border-slate-200 p-4">
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
           {selectedNode ? <Box className="h-4 w-4" /> : selectedArrow ? <ArrowRightLeft className="h-4 w-4" /> : <GitBranchPlus className="h-4 w-4" />}
@@ -44,10 +39,10 @@ export const RightSidebar = ({ issues }: RightSidebarProps) => {
           <div className="space-y-3">
             <label className="block text-sm text-slate-600">
               <span className="mb-1 block">Имя</span>
-              <input
+              <CommitInput
                 className="w-full rounded-lg border border-slate-300 px-3 py-2"
                 value={selectedNode.name}
-                onChange={(event) => updateNode(selectedNode.id, { name: event.target.value })}
+                onCommit={(value) => updateNode(selectedNode.id, { name: value })}
               />
             </label>
             {selectedNode.kind === 'function' ? (
@@ -63,10 +58,10 @@ export const RightSidebar = ({ issues }: RightSidebarProps) => {
             )}
             <label className="block text-sm text-slate-600">
               <span className="mb-1 block">Заметки</span>
-              <textarea
+              <CommitInput multiline
                 className="min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2"
                 value={selectedNode.notes ?? ''}
-                onChange={(event) => updateNode(selectedNode.id, { notes: event.target.value })}
+                onCommit={(value) => updateNode(selectedNode.id, { notes: value })}
               />
             </label>
             {selectedNode.kind === 'function' ? (
@@ -82,11 +77,18 @@ export const RightSidebar = ({ issues }: RightSidebarProps) => {
           <div className="space-y-3">
             <label className="block text-sm text-slate-600">
               <span className="mb-1 block">Подпись</span>
-              <input
+              <CommitInput
                 className="w-full rounded-lg border border-slate-300 px-3 py-2"
                 value={selectedArrow.label}
-                onChange={(event) => updateArrow(selectedArrow.id, { label: event.target.value })}
+                onCommit={(value) => updateArrow(selectedArrow.id, { label: value })}
               />
+            </label>
+            <label className="block text-sm text-slate-600">
+              <span className="mb-1 block">Смещение маршрута</span>
+              <input type="range" min="-200" max="200" step="10" defaultValue={selectedArrow.routeOffset ?? 0}
+                key={selectedArrow.id + ':' + (selectedArrow.routeOffset ?? 0)}
+                onPointerUp={event => updateArrow(selectedArrow.id, { routeOffset: Number(event.currentTarget.value) })}
+                onKeyUp={event => updateArrow(selectedArrow.id, { routeOffset: Number(event.currentTarget.value) })} />
             </label>
             <label className="block text-sm text-slate-600">
               <span className="mb-1 block">Тип стрелки</span>
@@ -97,10 +99,10 @@ export const RightSidebar = ({ issues }: RightSidebarProps) => {
           <div className="space-y-3">
             <label className="block text-sm text-slate-600">
               <span className="mb-1 block">Название диаграммы</span>
-              <input
+              <CommitInput
                 className="w-full rounded-lg border border-slate-300 px-3 py-2"
                 value={diagram?.title ?? ''}
-                onChange={(event) => updateDiagramTitle(event.target.value)}
+                onCommit={updateDiagramTitle}
               />
             </label>
             <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
@@ -111,30 +113,6 @@ export const RightSidebar = ({ issues }: RightSidebarProps) => {
         )}
       </section>
 
-      <section className="flex-1 rounded-xl border border-slate-200 p-4">
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <AlertTriangle className="h-4 w-4" /> Ошибки и предупреждения
-        </div>
-        <div className="space-y-2 overflow-auto pr-1">
-          {diagramIssues.length === 0 ? (
-            <div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-700">Проблем для текущей диаграммы не найдено.</div>
-          ) : (
-            diagramIssues.map((issue) => (
-              <div
-                key={issue.id}
-                className={`rounded-lg border p-3 text-sm ${
-                  issue.severity === 'error'
-                    ? 'border-red-200 bg-red-50 text-red-700'
-                    : 'border-amber-200 bg-amber-50 text-amber-700'
-                }`}
-              >
-                <div className="font-medium">{issue.message}</div>
-                <div className="mt-1 text-xs uppercase opacity-70">{issue.code}</div>
-              </div>
-            ))
-          )}
-        </div>
-      </section>
     </aside>
   )
 }

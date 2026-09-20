@@ -8,12 +8,14 @@ import {
   type Edge,
   type EdgeTypes,
   type Node,
-  type NodeChange,
   type NodeTypes,
   useReactFlow,
+  useNodesState,
+  useEdgesState,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
+import { useWorkspace } from '@/features/project/lib/workspace'
 import { useShallow } from 'zustand/react/shallow'
 import { ARROW_TYPE_COLORS, ARROW_TYPE_LABELS, SNAP_GRID } from '@/entities/idef0/constants'
 import { toFlowEdges, toFlowNodes } from '@/features/diagram/lib/flowMappers'
@@ -35,12 +37,7 @@ const edgeTypes = {
   idef0Arrow: ArrowEdge,
 } as unknown as EdgeTypes
 
-interface EditorCanvasProps {
-  canvasRef: React.RefObject<HTMLDivElement | null>
-  onFlowNodesChange: (nodes: Node[]) => void
-}
-
-const EditorCanvas = ({ canvasRef, onFlowNodesChange }: EditorCanvasProps) => {
+const EditorCanvas = () => {
   const diagram = useCurrentDiagram()
   const path = useCurrentPath()
   const reactFlow = useReactFlow()
@@ -54,8 +51,9 @@ const EditorCanvas = ({ canvasRef, onFlowNodesChange }: EditorCanvasProps) => {
     contextMenu,
     openDecomposition,
     removeElement,
-    updateNodePositions,
     project,
+    selection,
+    clipboard,
   } = useIdef0Store(useShallow((state) => ({
     connectArrow: state.connectArrow,
     createContextFunction: state.createContextFunction,
@@ -66,16 +64,24 @@ const EditorCanvas = ({ canvasRef, onFlowNodesChange }: EditorCanvasProps) => {
     contextMenu: state.contextMenu,
     openDecomposition: state.openDecomposition,
     removeElement: state.removeElement,
-    updateNodePositions: state.updateNodePositions,
     project: state.project,
+    selection: state.selection,
+    clipboard: state.clipboard,
   })))
 
-  const nodes = useMemo(() => (diagram ? toFlowNodes(diagram) : []), [diagram])
-  const edges = useMemo(() => (diagram ? toFlowEdges(diagram) : []), [diagram])
-
-  const updateExportNodes = useCallback(() => {
-    onFlowNodesChange(nodes)
-  }, [nodes, onFlowNodesChange])
+  const modelNodes = useMemo(() => diagram ? toFlowNodes(diagram) : [], [diagram])
+  const modelEdges = useMemo(() => diagram ? toFlowEdges(diagram) : [], [diagram])
+  const [nodes, setNodes, onNodesChange] = useNodesState(modelNodes)
+  const [edges, setEdges, onEdgesChange] = useEdgesState(modelEdges)
+  const viewportKey = `${project.id}:${diagram?.id}`
+  const initialViewport = useMemo(() => useWorkspace.getState().viewports[viewportKey], [viewportKey])
+  useEffect(() => {
+    setNodes(previous => modelNodes.map(node => ({ ...previous.find(n => n.id === node.id), ...node, selected: selection.nodeIds.includes(node.id) })))
+  }, [modelNodes, selection.nodeIds, setNodes])
+  useEffect(() => {
+    setEdges(modelEdges.map(edge => ({ ...edge, selected: selection.arrowIds.includes(edge.id) })))
+  }, [modelEdges, selection.arrowIds, setEdges])
+  const commitPositions = () => useIdef0Store.getState().updateNodePositions(reactFlow.getNodes().map(n => ({ id: n.id, ...n.position })))
 
   const handlePaneContextMenu = useCallback(
     (event: MouseEvent | React.MouseEvent) => {
@@ -157,14 +163,14 @@ const EditorCanvas = ({ canvasRef, onFlowNodesChange }: EditorCanvasProps) => {
   )
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-line bg-canvas shadow-panel">
+    <div className="diagram-editor">
       <div className="flex items-center justify-between border-b border-line bg-white px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-slate-900">{diagram?.title}</div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
             {path.map((item, index) => (
               <span key={item.id} className="flex items-center gap-2">
-                <span>{item.title}</span>
+                <button className="breadcrumb" onClick={() => useIdef0Store.getState().navigateToDiagram(item.id)}>{item.title}</button>
                 {index < path.length - 1 ? <span>›</span> : null}
               </span>
             ))}
@@ -180,37 +186,36 @@ const EditorCanvas = ({ canvasRef, onFlowNodesChange }: EditorCanvasProps) => {
         </div>
       </div>
 
-      <div ref={canvasRef} className="relative flex-1" onClick={() => setContextMenu(null)}>
+      <div className="canvas-toolbar">
+        <button onClick={() => addFunctionNode(reactFlow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))} disabled={diagram?.isContext && diagram.nodes.some(n => n.kind === 'function')}>＋ Функция</button>
+        {(['input', 'control', 'output', 'mechanism'] as const).map(role => <button key={role} onClick={() => addBoundaryNode(role, reactFlow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))}>{ARROW_TYPE_LABELS[role]}</button>)}
+        <span className="separator" />
+        <button onClick={() => useIdef0Store.getState().duplicateSelection()} disabled={!selection.nodeIds.length} title="Дублировать выделенные элементы · Ctrl+D">Копия</button>
+        <button onClick={() => useIdef0Store.getState().pasteSelection()} disabled={!clipboard} title="Вставить элементы · Ctrl+V">Вставить</button>
+        <button onClick={() => useIdef0Store.getState().alignSelection('x')} disabled={selection.nodeIds.length < 2}>По левому краю</button>
+        <button onClick={() => useIdef0Store.getState().alignSelection('y')} disabled={selection.nodeIds.length < 2}>По верхнему краю</button>
+        <label><input type="checkbox" checked={project.settings.snapToGrid} onChange={() => useIdef0Store.getState().toggleSnapToGrid()} /> Сетка</label>
+        <label><input type="checkbox" checked={project.settings.showMiniMap} onChange={() => useIdef0Store.getState().toggleMiniMap()} /> Миникарта</label>
+        <label><input type="checkbox" checked={project.settings.strictMode} onChange={() => useIdef0Store.getState().toggleStrictMode()} /> Строгий режим</label>
+      </div>
+      <div className="canvas-area">
         <ReactFlow
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          fitView
-          proOptions={{ hideAttribution: true }}
+          fitView={!initialViewport}
+          defaultViewport={initialViewport}
           minZoom={0.25}
           maxZoom={1.8}
           snapToGrid={project.settings.snapToGrid}
           snapGrid={SNAP_GRID}
           multiSelectionKeyCode={['Meta', 'Control']}
           deleteKeyCode={null}
-          onInit={updateExportNodes}
-          onNodesChange={(changes) => {
-            const positions = (changes as NodeChange[])
-              .filter(
-                (
-                  change,
-                ): change is NodeChange & {
-                  type: 'position'
-                  position: { x: number; y: number }
-                } => change.type === 'position' && Boolean(change.position),
-              )
-              .map((change) => ({ id: change.id, x: change.position.x, y: change.position.y }))
-
-            if (positions.length > 0) {
-              updateNodePositions(positions)
-            }
-          }}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodeDragStop={commitPositions}
+          onSelectionDragStop={commitPositions}
           onConnect={(connection) => {
             const result = connectArrow(connection)
             if (!result.ok && result.message) {
@@ -231,7 +236,7 @@ const EditorCanvas = ({ canvasRef, onFlowNodesChange }: EditorCanvasProps) => {
           onPaneContextMenu={handlePaneContextMenu}
           onNodeContextMenu={handleNodeContextMenu}
           onEdgeContextMenu={handleEdgeContextMenu}
-          onMoveEnd={updateExportNodes}
+          onMoveEnd={(_, viewport) => useWorkspace.getState().setViewport(viewportKey, viewport)}
           onPaneClick={() => {
             setSelection({ nodeIds: [], arrowIds: [] })
             setContextMenu(null)
@@ -277,8 +282,8 @@ const EditorCanvas = ({ canvasRef, onFlowNodesChange }: EditorCanvasProps) => {
 
         {contextMenu ? (
           <div
-            className="absolute z-20 min-w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-2xl"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
+            className="fixed z-20 min-w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-2xl"
+            style={{ left: Math.min(contextMenu.x, window.innerWidth - 240), top: Math.min(contextMenu.y, window.innerHeight - 300) }}
           >
             {contextMenu.kind === 'pane' ? (
               <>
@@ -317,13 +322,8 @@ const EditorCanvas = ({ canvasRef, onFlowNodesChange }: EditorCanvasProps) => {
   )
 }
 
-interface DiagramEditorProps {
-  canvasRef: React.RefObject<HTMLDivElement | null>
-  onFlowNodesChange: (nodes: Node[]) => void
-}
-
-export const DiagramEditor = ({ canvasRef, onFlowNodesChange }: DiagramEditorProps) => (
+export const DiagramEditor = () => (
   <ReactFlowProvider>
-    <EditorCanvas canvasRef={canvasRef} onFlowNodesChange={onFlowNodesChange} />
+    <EditorCanvas />
   </ReactFlowProvider>
 )

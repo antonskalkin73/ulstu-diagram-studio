@@ -1,3 +1,4 @@
+import type { Project } from './project'
 export type ArrowType = 'input' | 'control' | 'output' | 'mechanism'
 
 export type ValidationSeverity = 'error' | 'warning'
@@ -44,9 +45,11 @@ export interface IDEF0Arrow {
   targetHandle: string
   arrowType: ArrowType
   label: string
+  routeOffset?: number
 }
 
 export interface IDEF0Diagram {
+  type: 'idef0'
   id: string
   title: string
   nodeNumber: string
@@ -57,15 +60,4 @@ export interface IDEF0Diagram {
   arrows: IDEF0Arrow[]
 }
 
-export interface IDEF0Project {
-  id: string
-  name: string
-  version: string
-  rootDiagramId: string
-  diagrams: IDEF0Diagram[]
-  settings: EditorSettings
-  meta: {
-    createdAt: string
-    updatedAt: string
-  }
-}
+export type IDEF0Project = Project<IDEF0Diagram>
