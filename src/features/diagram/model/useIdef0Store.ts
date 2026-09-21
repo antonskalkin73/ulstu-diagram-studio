@@ -1,13 +1,18 @@
+import { erHandle, handleColumn, newTable, newForeignKey, tableHeight, ER_WIDTH } from '@/features/er/model'
+import type { ERTable, ERForeignKey } from '@/types/er'
+import { flowchartShapes, flowchartSides, type FlowchartShape } from '@/types/flowchart'
+import { getDiagramFrame, getExternalArrowFunction } from '@/features/diagram/lib/diagramGeometry'
+import { produce } from 'immer'
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
 import type { Connection } from '@xyflow/react'
 import { BOUNDARY_HANDLES, FUNCTION_HANDLES } from '@/entities/idef0/constants'
 import { createBoundaryPortNode, createChildDiagram, createEmptyProject, createFunctionNode } from '@/features/project/lib/projectFactory'
-import type { ArrowType, IDEF0Project, ValidationIssue } from '@/types/idef0'
+import type { ArrowType } from '@/types/idef0'
+import type { DiagramNode, DiagramArrow, EditorProject, ValidationIssue } from '@/types/diagram'
 import { validateProject } from '@/features/validation/lib/validateProject'
 import { createId } from '@/utils/id'
 import {
-  cloneProject,
   collectChildDiagramIds,
   getArrowTypeFromHandles,
   getDiagramById,
@@ -17,7 +22,7 @@ import {
 } from '@/utils/idef0'
 
 interface HistoryEntry {
-  project: IDEF0Project
+  project: EditorProject
   currentDiagramId: string
 }
 
@@ -41,14 +46,14 @@ interface ContextMenuState {
 }
 
 interface DraftState {
-  project: IDEF0Project
+  project: EditorProject
   currentDiagramId: string
   selection: SelectionState
   selectedElement: SelectedElement | null
 }
 
 interface Idef0Store {
-  project: IDEF0Project
+  project: EditorProject
   currentDiagramId: string
   issues: ValidationIssue[]
   selection: SelectionState
@@ -56,16 +61,29 @@ interface Idef0Store {
   contextMenu: ContextMenuState | null
   past: HistoryEntry[]
   future: HistoryEntry[]
-  setProject: (project: IDEF0Project) => void
+  addDiagram: (type?: 'idef0' | 'flowchart' | 'er') => void
+  addERTable: (position: { x: number; y: number }) => void
+  updateERTable: (id: string, name: string, table: ERTable, notes: string) => void
+  saveERForeignKey: (id: string | null, source: string, target: string, label: string, foreignKey: ERForeignKey, handles?: { sourceHandle: string | null; targetHandle: string | null }) => boolean
+  addFlowchartNode: (shape: FlowchartShape, position: { x: number; y: number }) => void
+  setFlowchartShape: (id: string, shape: FlowchartShape) => void
+  deleteDiagram: (id: string) => void
+  clipboard: { type: 'idef0' | 'flowchart' | 'er'; nodes: DiagramNode[]; arrows: DiagramArrow[] } | null
+  copySelection: () => void
+  pasteSelection: () => void
+  duplicateSelection: () => void
+  alignSelection: (axis: 'x' | 'y') => void
+  setProject: (project: EditorProject) => void
   newProject: () => void
   setProjectName: (name: string) => void
   updateDiagramTitle: (title: string) => void
   navigateToDiagram: (diagramId: string) => void
   createContextFunction: (position?: { x: number; y: number }) => void
   addFunctionNode: (position: { x: number; y: number }) => void
+  addExternalArrow: (role: ArrowType, functionId?: string, point?: { x: number; y: number }) => void
   addBoundaryNode: (role: ArrowType, position: { x: number; y: number }) => void
   updateNode: (nodeId: string, patch: Partial<{ name: string; notes: string }>) => void
-  updateArrow: (arrowId: string, patch: Partial<{ label: string }>) => void
+  updateArrow: (arrowId: string, patch: Partial<{ label: string; routeOffset: number }>) => void
   removeElement: (kind: 'node' | 'arrow', id: string) => void
   deleteSelection: () => void
   updateNodePositions: (positions: Array<{ id: string; x: number; y: number }>) => void
@@ -80,7 +98,7 @@ interface Idef0Store {
   redo: () => void
 }
 
-const buildIssues = (project: IDEF0Project): ValidationIssue[] => validateProject(project)
+const buildIssues = (project: EditorProject): ValidationIssue[] => validateProject(project)
 
 const initialProject = createEmptyProject()
 
@@ -88,33 +106,35 @@ const applyMutation = (
   state: Idef0Store,
   mutator: (draft: DraftState) => void,
 ): Partial<Idef0Store> => {
-  const snapshot: HistoryEntry = {
-    project: cloneProject(state.project),
-    currentDiagramId: state.currentDiagramId,
-  }
-  const draft: DraftState = {
-    project: cloneProject(state.project),
-    currentDiagramId: state.currentDiagramId,
-    selection: cloneProject(state.selection),
-    selectedElement: cloneProject(state.selectedElement),
-  }
-
-  mutator(draft)
-  draft.project.meta.updatedAt = new Date().toISOString()
-
+  const before: DraftState = { project: state.project, currentDiagramId: state.currentDiagramId, selection: state.selection, selectedElement: state.selectedElement }
+  const draft = produce(before, draft => {
+    mutator(draft)
+    for (const diagram of draft.project.diagrams) {
+      if (diagram.type === 'er') {
+        for (const node of diagram.nodes) if (node.kind === 'erTable') { node.width = ER_WIDTH; node.height = tableHeight(node) }
+      }
+      const previous = state.project.diagrams.find(d => d.id === diagram.id)
+      if (!previous || previous.arrows === diagram.arrows) continue
+      const obsolete = diagram.nodes.filter(n => n.kind === 'boundaryPort'
+        && previous.arrows.some(a => a.source === n.id || a.target === n.id)
+        && !diagram.arrows.some(a => a.source === n.id || a.target === n.id)).map(n => n.id)
+      if (obsolete.length) diagram.nodes = diagram.nodes.filter(n => !obsolete.includes(n.id))
+    }
+  })
+  if (draft === before) return {}
+  const changed = draft.project !== state.project
+  const project = changed ? produce(draft.project, p => { p.meta.updatedAt = new Date().toISOString() }) : state.project
   return {
-    project: draft.project,
-    currentDiagramId: draft.currentDiagramId,
-    selection: draft.selection,
-    selectedElement: draft.selectedElement,
-    issues: buildIssues(draft.project),
+    ...draft, project,
+    issues: changed ? buildIssues(project) : state.issues,
     contextMenu: null,
-    past: [...state.past, snapshot].slice(-100),
-    future: [],
+    past: changed ? [...state.past, { project: state.project, currentDiagramId: state.currentDiagramId }].slice(-100) : state.past,
+    future: changed ? [] : state.future,
   }
 }
 
 export const useIdef0Store = create<Idef0Store>((set, get) => ({
+  clipboard: null,
   project: initialProject,
   currentDiagramId: initialProject.rootDiagramId,
   issues: buildIssues(initialProject),
@@ -123,6 +143,119 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
   contextMenu: null,
   past: [],
   future: [],
+  addDiagram: (type = 'idef0') => set(state => applyMutation(state, draft => {
+    const diagram = createEmptyProject(type).diagrams[0]!
+    diagram.title = `${type === 'flowchart' ? 'Блок-схема' : type === 'er' ? 'Схема данных' : 'Новая модель'} ${draft.project.diagrams.filter(d => !d.parentDiagramId).length + 1}`
+    draft.project.diagrams.push(diagram)
+    draft.currentDiagramId = diagram.id
+    draft.selection = { nodeIds: [], arrowIds: [] }
+    draft.selectedElement = { kind: 'diagram', id: diagram.id }
+  })),
+  addERTable: (position) => set(state => applyMutation(state, draft => {
+    const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+    if (diagram?.type !== 'er') return
+    const node: DiagramNode = { id: createId('table'), kind: 'erTable', diagramId: diagram.id, name: '', position, width: ER_WIDTH, height: 140, table: newTable() }
+    diagram.nodes.push(node)
+    draft.selection = { nodeIds: [node.id], arrowIds: [] }
+    draft.selectedElement = { kind: 'node', id: node.id }
+  })),
+  updateERTable: (id, name, table, notes) => set(state => applyMutation(state, draft => {
+    const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+    const node = diagram?.nodes.find(n => n.id === id)
+    if (diagram?.type !== 'er' || node?.kind !== 'erTable') return
+    node.name = name; node.notes = notes; node.table = structuredClone(table)
+    for (const c of node.table.columns) if (c.primaryKey || c.identity || /serial$/.test(c.dataType)) c.nullable = false
+    const ids = new Set(node.table.columns.map(c => c.id))
+    node.table.indexes = node.table.indexes.map(i => ({ ...i, columns: i.columns.filter(id => ids.has(id)), include: i.include.filter(id => ids.has(id)) }))
+    diagram.arrows = diagram.arrows.filter(a => !(a.source === id && a.foreignKey?.columns.some(c => !ids.has(c))) && !(a.target === id && a.foreignKey?.referencedColumns.some(c => !ids.has(c))))
+    for (const a of diagram.arrows) if (a.foreignKey) {
+      a.sourceHandle = erHandle(a.foreignKey.columns[0]!, a.sourceHandle.endsWith(':left') ? 'left' : 'right')
+      a.targetHandle = erHandle(a.foreignKey.referencedColumns[0]!, a.targetHandle.endsWith(':right') ? 'right' : 'left')
+    }
+  })),
+  saveERForeignKey: (id, source, target, label, foreignKey, handles) => {
+    const diagram = getDiagramById(get().project.diagrams, get().currentDiagramId)
+    const from = diagram?.nodes.find(n => n.id === source), to = diagram?.nodes.find(n => n.id === target)
+    if (diagram?.type !== 'er' || from?.kind !== 'erTable' || to?.kind !== 'erTable' || !foreignKey.columns.length || foreignKey.columns.length !== foreignKey.referencedColumns.length || foreignKey.columns.some(c => !from.table.columns.some(col => col.id === c)) || foreignKey.referencedColumns.some(c => !to.table.columns.some(col => col.id === c))) return false
+    set(state => applyMutation(state, draft => {
+      const active = getDiagramById(draft.project.diagrams, draft.currentDiagramId)!
+      const previous = active.arrows.find(a => a.id === id)
+      const arrow: DiagramArrow = { id: id ?? createId('fk'), arrowType: 'relation', source, target, sourceHandle: handles?.sourceHandle ?? erHandle(foreignKey.columns[0]!, previous ? (previous.sourceHandle.endsWith(':left') ? 'left' : 'right') : (from.id === to.id || from.position.x <= to.position.x ? 'right' : 'left')), targetHandle: handles?.targetHandle ?? erHandle(foreignKey.referencedColumns[0]!, previous ? (previous.targetHandle.endsWith(':right') ? 'right' : 'left') : (from.id === to.id || from.position.x <= to.position.x ? 'left' : 'right')), label, foreignKey: structuredClone(foreignKey), routeOffset: previous?.routeOffset }
+      if (previous) active.arrows[active.arrows.indexOf(previous)] = arrow
+      else active.arrows.push(arrow)
+      draft.selection = { nodeIds: [], arrowIds: [arrow.id] }
+      draft.selectedElement = { kind: 'arrow', id: arrow.id }
+    }))
+    return true
+  },
+  addFlowchartNode: (shape, position) => set(state => applyMutation(state, draft => {
+    const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+    if (diagram?.type !== 'flowchart') return
+    const size = flowchartShapes[shape]
+    const node: DiagramNode = { id: createId('node'), kind: 'flowchart', shape, diagramId: diagram.id, name: '', position, width: size.width, height: size.height }
+    diagram.nodes.push(node)
+    draft.selection = { nodeIds: [node.id], arrowIds: [] }
+    draft.selectedElement = { kind: 'node', id: node.id }
+  })),
+  setFlowchartShape: (id, shape) => set(state => applyMutation(state, draft => {
+    const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+    const node = diagram?.nodes.find(n => n.id === id)
+    if (diagram?.type !== 'flowchart' || node?.kind !== 'flowchart') return
+    node.shape = shape
+    node.width = flowchartShapes[shape].width
+    node.height = flowchartShapes[shape].height
+  })),
+  deleteDiagram: (id) => set(state => applyMutation(state, draft => {
+    if (id === draft.project.rootDiagramId) return
+    const removed = new Set(collectChildDiagramIds(draft.project.diagrams, id))
+    draft.project.diagrams = draft.project.diagrams.filter(d => !removed.has(d.id))
+    for (const d of draft.project.diagrams) for (const n of d.nodes) if (n.childDiagramId && removed.has(n.childDiagramId)) n.childDiagramId = null
+    if (removed.has(draft.currentDiagramId)) draft.currentDiagramId = draft.project.rootDiagramId
+    draft.selection = { nodeIds: [], arrowIds: [] }
+    draft.selectedElement = { kind: 'diagram', id: draft.currentDiagramId }
+  })),
+  copySelection: () => {
+    const state = get()
+    const d = getDiagramById(state.project.diagrams, state.currentDiagramId)
+    if (!d) return
+    const nodes = d.nodes.filter(n => state.selection.nodeIds.includes(n.id))
+    if (!nodes.length) return
+    set({ clipboard: structuredClone({ type: d.type, nodes, arrows: d.arrows.filter(a => nodes.some(n => n.id === a.source) && nodes.some(n => n.id === a.target)) }) })
+  },
+  pasteSelection: () => set(state => applyMutation(state, draft => {
+    const d = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+    if (!d || !state.clipboard || state.clipboard.type !== d.type) return
+    const mapping = new Map<string, string>()
+    const columns = new Map<string, string>()
+    for (const n of state.clipboard.nodes) {
+      if (d.isContext && n.kind === 'function' && d.nodes.some(node => node.kind === 'function')) continue
+      const copy = { ...structuredClone(n), id: createId('node'), diagramId: d.id, position: { x: n.position.x + 40, y: n.position.y + 40 }, childDiagramId: null }
+      if (n.kind === 'function') copy.nodeNumber = createFunctionNode(d, undefined, copy.position).nodeNumber
+      if (copy.kind === 'erTable') {
+        let suffix = 1
+        const base = (copy.name || 'table') + '_copy'
+        copy.name = base
+        while (d.nodes.some(n => n.kind === 'erTable' && n.table.schema === copy.table.schema && n.name === copy.name)) copy.name = `${base}_${suffix++}`
+        for (const c of copy.table.columns) { const id = createId('column'); columns.set(c.id, id); c.id = id }
+        for (const i of copy.table.indexes) { i.id = createId('index'); i.name = ''; i.columns = i.columns.map(id => columns.get(id)!); i.include = i.include.map(id => columns.get(id)!) }
+        for (const c of copy.table.checks) { c.id = createId('check'); c.name = '' }
+      }
+      mapping.set(n.id, copy.id)
+      d.nodes.push(copy)
+    }
+    for (const a of state.clipboard.arrows) if (mapping.has(a.source) && mapping.has(a.target)) d.arrows.push({ ...a, id: createId('arrow'), source: mapping.get(a.source)!, target: mapping.get(a.target)!, ...(a.foreignKey ? { label: '', foreignKey: { ...a.foreignKey, columns: a.foreignKey.columns.map(id => columns.get(id)!), referencedColumns: a.foreignKey.referencedColumns.map(id => columns.get(id)!) }, sourceHandle: erHandle(columns.get(handleColumn(a.sourceHandle))!, a.sourceHandle.endsWith(':left') ? 'left' : 'right'), targetHandle: erHandle(columns.get(handleColumn(a.targetHandle))!, a.targetHandle.endsWith(':right') ? 'right' : 'left') } : {}) })
+    if (!mapping.size) return
+    draft.selection = { nodeIds: [...mapping.values()], arrowIds: [] }
+    draft.selectedElement = { kind: 'node', id: [...mapping.values()][0]! }
+  })),
+  duplicateSelection: () => { if (!get().selection.nodeIds.length) return; get().copySelection(); get().pasteSelection() },
+  alignSelection: (axis) => {
+    const state = get()
+    const nodes = getDiagramById(state.project.diagrams, state.currentDiagramId)?.nodes.filter(n => state.selection.nodeIds.includes(n.id)) ?? []
+    if (nodes.length < 2) return
+    const value = Math.min(...nodes.map(n => n.position[axis]))
+    state.updateNodePositions(nodes.map(n => ({ id: n.id, ...n.position, [axis]: value })))
+  },
   setProject: (project) => {
     set({
       project,
@@ -182,7 +315,7 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     set((state) =>
       applyMutation(state, (draft) => {
         const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
-        if (!diagram || diagram.nodes.some((node) => node.kind === 'function')) {
+        if (!diagram || diagram.type !== 'idef0' || diagram.nodes.some((node) => node.kind === 'function')) {
           return
         }
 
@@ -191,10 +324,12 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     )
   },
   addFunctionNode: (position) => {
+    const active = getDiagramById(get().project.diagrams, get().currentDiagramId)
+    if (active?.isContext && active.nodes.some(n => n.kind === 'function')) return
     set((state) =>
       applyMutation(state, (draft) => {
         const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
-        if (!diagram) {
+        if (!diagram || diagram.type !== 'idef0') {
           return
         }
 
@@ -206,11 +341,36 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
       }),
     )
   },
+  addExternalArrow: (role, functionId, boundaryPoint) => set(state => applyMutation(state, draft => {
+    const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+    if (!diagram || diagram.type !== 'idef0') return
+    const fn = functionId ? diagram.nodes.find(n => n.id === functionId && n.kind === 'function') : getExternalArrowFunction(diagram, draft.selection)
+    if (!fn) return
+    const frame = getDiagramFrame(diagram)
+    const count = diagram.arrows.filter(a => a.arrowType === role && (a.source === fn.id || a.target === fn.id)).length
+    const x = fn.position.x + fn.width / 2 + count * 40
+    const y = fn.position.y + fn.height / 2 + count * 40
+    const point = boundaryPoint ?? (role === 'input' ? { x: frame.x, y } : role === 'output' ? { x: frame.x + frame.width, y }
+      : role === 'control' ? { x, y: frame.y } : { x, y: frame.y + frame.height })
+    const boundary = createBoundaryPortNode(diagram.id, role, { x: point.x - 4, y: point.y - 4 })
+    diagram.nodes.push(boundary)
+    const arrow = {
+      id: createId('arrow'), arrowType: role, label: '',
+      source: role === 'output' ? fn.id : boundary.id,
+      target: role === 'output' ? boundary.id : fn.id,
+      sourceHandle: role === 'output' ? FUNCTION_HANDLES.outputSource : BOUNDARY_HANDLES.sourceOutput,
+      targetHandle: role === 'output' ? BOUNDARY_HANDLES.outputTarget : role === 'input' ? FUNCTION_HANDLES.inputTarget
+        : role === 'control' ? FUNCTION_HANDLES.controlTarget : FUNCTION_HANDLES.mechanismTarget,
+    }
+    diagram.arrows.push(arrow)
+    draft.selection = { nodeIds: [], arrowIds: [arrow.id] }
+    draft.selectedElement = { kind: 'arrow', id: arrow.id }
+  })),
   addBoundaryNode: (role, position) => {
     set((state) =>
       applyMutation(state, (draft) => {
         const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
-        if (!diagram) {
+        if (!diagram || diagram.type !== 'idef0') {
           return
         }
 
@@ -249,7 +409,11 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
           return
         }
 
+        if (typeof patch.routeOffset === 'number') arrow.routeOffset = patch.routeOffset
         if (typeof patch.label === 'string') {
+          for (const node of diagram!.nodes) {
+            if (node.kind === 'boundaryPort' && (node.id === arrow.source || node.id === arrow.target)) node.name = ''
+          }
           arrow.label = patch.label
         }
       }),
@@ -282,14 +446,21 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     )
   },
   deleteSelection: () => {
-    const { selection, removeElement } = get()
-
-    if (selection.arrowIds.length > 0) {
-      selection.arrowIds.forEach((id) => removeElement('arrow', id))
-      return
-    }
-
-    selection.nodeIds.forEach((id) => removeElement('node', id))
+    if (!get().selection.nodeIds.length && !get().selection.arrowIds.length) return
+    set(state => applyMutation(state, draft => {
+      const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+      if (!diagram) return
+      const selected = new Set(state.selection.nodeIds)
+      const removed = new Set<string>()
+      diagram.nodes.filter(n => selected.has(n.id)).forEach(n => {
+        if (n.childDiagramId) collectChildDiagramIds(draft.project.diagrams, n.childDiagramId).forEach(id => removed.add(id))
+      })
+      diagram.nodes = diagram.nodes.filter(n => !selected.has(n.id))
+      diagram.arrows = diagram.arrows.filter(a => !selected.has(a.source) && !selected.has(a.target) && !state.selection.arrowIds.includes(a.id))
+      draft.project.diagrams = draft.project.diagrams.filter(d => !removed.has(d.id))
+      draft.selection = { nodeIds: [], arrowIds: [] }
+      draft.selectedElement = { kind: 'diagram', id: draft.currentDiagramId }
+    }))
   },
   updateNodePositions: (positions) => {
     set((state) =>
@@ -302,7 +473,7 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
         positions.forEach(({ id, x, y }) => {
           const node = getNodeById(diagram, id)
           if (node) {
-            node.position = { x, y }
+            if (node.position.x !== x || node.position.y !== y) node.position = { x, y }
           }
         })
       }),
@@ -317,8 +488,28 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
 
     const source = getNodeById(diagram, connection.source)
     const target = getNodeById(diagram, connection.target)
+    if (diagram.type === 'er') {
+      const from = handleColumn(connection.sourceHandle), to = handleColumn(connection.targetHandle)
+      if (diagram.arrows.some(a => a.source === source?.id && a.target === target?.id && a.foreignKey?.columns.join() === from && a.foreignKey.referencedColumns.join() === to)) return { ok: false, message: 'Такой внешний ключ уже существует.' }
+      const ok = get().saveERForeignKey(null, connection.source, connection.target, '', newForeignKey(from, to), connection)
+      return { ok, message: ok ? undefined : 'Соедините колонку внешнего ключа с колонкой родительской таблицы.' }
+    }
     if (!source || !target || source.id === target.id) {
       return { ok: false, message: 'Нельзя соединить элемент сам с собой.' }
+    }
+
+    if (diagram.type === 'flowchart') {
+      if (!flowchartSides.some(side => side === connection.sourceHandle) || !flowchartSides.some(side => side === connection.targetHandle)) return { ok: false, message: 'Выберите точку на стороне блока.' }
+      if (source.shape === 'end' || target.shape === 'start') return { ok: false, message: 'В «Начало» нельзя входить, а из «Конец» нельзя выходить.' }
+      if (diagram.arrows.some(a => a.source === source.id && a.target === target.id && a.sourceHandle === connection.sourceHandle && a.targetHandle === connection.targetHandle)) return { ok: false, message: 'Такой переход уже существует.' }
+      set(current => applyMutation(current, draft => {
+        const active = getDiagramById(draft.project.diagrams, draft.currentDiagramId)!
+        const arrow: DiagramArrow = { id: createId('arrow'), source: source.id, target: target.id, sourceHandle: connection.sourceHandle!, targetHandle: connection.targetHandle!, arrowType: 'sequence', label: '' }
+        active.arrows.push(arrow)
+        draft.selection = { nodeIds: [], arrowIds: [arrow.id] }
+        draft.selectedElement = { kind: 'arrow', id: arrow.id }
+      }))
+      return { ok: true }
     }
 
     const arrowType = getArrowTypeFromHandles(source, target, connection.sourceHandle, connection.targetHandle)
@@ -347,7 +538,7 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
           sourceHandle: connection.sourceHandle ?? FUNCTION_HANDLES.outputSource,
           targetHandle: connection.targetHandle ?? BOUNDARY_HANDLES.outputTarget,
           arrowType,
-          label: `${arrowType.toUpperCase()} flow`,
+          label: '',
         })
       }),
     )
@@ -359,7 +550,7 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
       applyMutation(state, (draft) => {
         const currentDiagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
         const node = currentDiagram ? getNodeById(currentDiagram, nodeId) : undefined
-        if (!currentDiagram || !node || node.kind !== 'function') {
+        if (!currentDiagram || currentDiagram.type !== 'idef0' || !node || node.kind !== 'function') {
           return
         }
 
@@ -376,6 +567,8 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     )
   },
   setSelection: (selection) => {
+    const previous = get().selection
+    if (previous.nodeIds.join('|') === selection.nodeIds.join('|') && previous.arrowIds.join('|') === selection.arrowIds.join('|')) return
     const currentDiagramId = get().currentDiagramId
     const selectedElement = selection.nodeIds[0]
       ? { kind: 'node' as const, id: selection.nodeIds[0] }
@@ -415,7 +608,7 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     }
 
     const current: HistoryEntry = {
-      project: cloneProject(state.project),
+      project: state.project,
       currentDiagramId: state.currentDiagramId,
     }
 
@@ -438,7 +631,7 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     }
 
     const current: HistoryEntry = {
-      project: cloneProject(state.project),
+      project: state.project,
       currentDiagramId: state.currentDiagramId,
     }
 
