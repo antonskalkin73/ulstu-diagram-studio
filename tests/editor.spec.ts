@@ -9,7 +9,7 @@ test('projects, tabs, drag undo, persistence, export and responsive workspace', 
   await page.getByRole('button', { name: 'Новый проект', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('button', { name: /Блок-схема/ })).toBeEnabled()
-  await expect(dialog.getByRole('button', { name: /ERD/ })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: /ERD/ })).toBeEnabled()
   await page.screenshot({ path: 'test-results/chooser.png', fullPage: true })
   await dialog.getByRole('button', { name: /IDEF0/ }).click()
   await expect(page.locator('.project-heading [role=status]')).toHaveText('Сохранено в браузере')

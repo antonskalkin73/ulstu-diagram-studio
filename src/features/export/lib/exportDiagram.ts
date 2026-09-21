@@ -1,3 +1,4 @@
+import { buildERSvg } from '@/features/er/exportER'
 import { flowchartHandleInset, flowchartOutline } from '@/features/flowchart/geometry'
 import { getArrowLabel, getBoundaryPoint, getDiagramFrame } from '@/features/diagram/lib/diagramGeometry'
 import { getSmoothStepPath, Position } from '@xyflow/react'
@@ -45,6 +46,7 @@ function wrap(text: string, width: number) {
   return lines
 }
 export function buildDiagramSvg(diagram: EditorDiagram) {
+  if (diagram.type === 'er') return buildERSvg(diagram)
   const nodes = new Map(diagram.nodes.map(n => [n.id, n]))
   const frame = diagram.type === 'flowchart' && diagram.nodes.length ? (() => {
     const x = Math.min(...diagram.nodes.map(n => n.position.x)) - 40, y = Math.min(...diagram.nodes.map(n => n.position.y)) - 40
@@ -59,7 +61,7 @@ export function buildDiagramSvg(diagram: EditorDiagram) {
     const source = endpoint(from, arrow.sourceHandle, frame), target = endpoint(to, arrow.targetHandle, frame)
     const cx = (source.x + target.x) / 2 + (arrow.routeOffset ?? 0), cy = (source.y + target.y) / 2 + (arrow.routeOffset ?? 0)
     const [path, x, y] = getSmoothStepPath({ sourceX: source.x, sourceY: source.y, targetX: target.x, targetY: target.y, sourcePosition: source.side, targetPosition: target.side, borderRadius: 0, offset: 30, centerX: cx, centerY: cy })
-    const color = (arrow.arrowType === 'sequence' ? '#475569' : ARROW_TYPE_COLORS[arrow.arrowType])
+    const color = ((arrow.arrowType === 'sequence' || arrow.arrowType === 'relation') ? '#475569' : ARROW_TYPE_COLORS[arrow.arrowType])
     const label = getArrowLabel(arrow, diagram)
     const labelWidth = Math.max(40, label.length * 8)
     minX = Math.min(minX, cx - 60, x - labelWidth / 2); maxX = Math.max(maxX, cx + 60, x + labelWidth / 2)

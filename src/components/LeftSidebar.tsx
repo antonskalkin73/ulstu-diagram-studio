@@ -14,7 +14,7 @@ function TreeItem({ diagram, diagrams, activeId, onOpen, onDelete, rootId }: {
         {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
       <button className="tree-title" onClick={() => onOpen(diagram.id)} title={diagram.title}>
-        <span>{diagram.title}</span><small>{diagram.type === 'idef0' ? `${diagram.nodeNumber} · IDEF0` : 'Блок-схема'}</small>
+        <span>{diagram.title}</span><small>{diagram.type === 'idef0' ? `${diagram.nodeNumber} · IDEF0` : diagram.type === 'er' ? 'ERD · PostgreSQL 18' : 'Блок-схема'}</small>
       </button>
       {diagram.id !== rootId && <button className="tree-delete" aria-label={`Удалить ${diagram.title}`} onClick={() => onDelete(diagram.id)}><Trash2 size={13} /></button>}
     </div>

@@ -1,3 +1,5 @@
+import { erHandle, handleColumn, newTable, newForeignKey, tableHeight, ER_WIDTH } from '@/features/er/model'
+import type { ERTable, ERForeignKey } from '@/types/er'
 import { flowchartShapes, flowchartSides, type FlowchartShape } from '@/types/flowchart'
 import { getDiagramFrame, getExternalArrowFunction } from '@/features/diagram/lib/diagramGeometry'
 import { produce } from 'immer'
@@ -59,11 +61,14 @@ interface Idef0Store {
   contextMenu: ContextMenuState | null
   past: HistoryEntry[]
   future: HistoryEntry[]
-  addDiagram: (type?: 'idef0' | 'flowchart') => void
+  addDiagram: (type?: 'idef0' | 'flowchart' | 'er') => void
+  addERTable: (position: { x: number; y: number }) => void
+  updateERTable: (id: string, name: string, table: ERTable, notes: string) => void
+  saveERForeignKey: (id: string | null, source: string, target: string, label: string, foreignKey: ERForeignKey, handles?: { sourceHandle: string | null; targetHandle: string | null }) => boolean
   addFlowchartNode: (shape: FlowchartShape, position: { x: number; y: number }) => void
   setFlowchartShape: (id: string, shape: FlowchartShape) => void
   deleteDiagram: (id: string) => void
-  clipboard: { type: 'idef0' | 'flowchart'; nodes: DiagramNode[]; arrows: DiagramArrow[] } | null
+  clipboard: { type: 'idef0' | 'flowchart' | 'er'; nodes: DiagramNode[]; arrows: DiagramArrow[] } | null
   copySelection: () => void
   pasteSelection: () => void
   duplicateSelection: () => void
@@ -105,6 +110,9 @@ const applyMutation = (
   const draft = produce(before, draft => {
     mutator(draft)
     for (const diagram of draft.project.diagrams) {
+      if (diagram.type === 'er') {
+        for (const node of diagram.nodes) if (node.kind === 'erTable') { node.width = ER_WIDTH; node.height = tableHeight(node) }
+      }
       const previous = state.project.diagrams.find(d => d.id === diagram.id)
       if (!previous || previous.arrows === diagram.arrows) continue
       const obsolete = diagram.nodes.filter(n => n.kind === 'boundaryPort'
@@ -137,12 +145,49 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
   future: [],
   addDiagram: (type = 'idef0') => set(state => applyMutation(state, draft => {
     const diagram = createEmptyProject(type).diagrams[0]!
-    diagram.title = `${type === 'flowchart' ? 'Блок-схема' : 'Новая модель'} ${draft.project.diagrams.filter(d => !d.parentDiagramId).length + 1}`
+    diagram.title = `${type === 'flowchart' ? 'Блок-схема' : type === 'er' ? 'Схема данных' : 'Новая модель'} ${draft.project.diagrams.filter(d => !d.parentDiagramId).length + 1}`
     draft.project.diagrams.push(diagram)
     draft.currentDiagramId = diagram.id
     draft.selection = { nodeIds: [], arrowIds: [] }
     draft.selectedElement = { kind: 'diagram', id: diagram.id }
   })),
+  addERTable: (position) => set(state => applyMutation(state, draft => {
+    const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+    if (diagram?.type !== 'er') return
+    const node: DiagramNode = { id: createId('table'), kind: 'erTable', diagramId: diagram.id, name: '', position, width: ER_WIDTH, height: 140, table: newTable() }
+    diagram.nodes.push(node)
+    draft.selection = { nodeIds: [node.id], arrowIds: [] }
+    draft.selectedElement = { kind: 'node', id: node.id }
+  })),
+  updateERTable: (id, name, table, notes) => set(state => applyMutation(state, draft => {
+    const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
+    const node = diagram?.nodes.find(n => n.id === id)
+    if (diagram?.type !== 'er' || node?.kind !== 'erTable') return
+    node.name = name; node.notes = notes; node.table = structuredClone(table)
+    for (const c of node.table.columns) if (c.primaryKey || c.identity || /serial$/.test(c.dataType)) c.nullable = false
+    const ids = new Set(node.table.columns.map(c => c.id))
+    node.table.indexes = node.table.indexes.map(i => ({ ...i, columns: i.columns.filter(id => ids.has(id)), include: i.include.filter(id => ids.has(id)) }))
+    diagram.arrows = diagram.arrows.filter(a => !(a.source === id && a.foreignKey?.columns.some(c => !ids.has(c))) && !(a.target === id && a.foreignKey?.referencedColumns.some(c => !ids.has(c))))
+    for (const a of diagram.arrows) if (a.foreignKey) {
+      a.sourceHandle = erHandle(a.foreignKey.columns[0]!, a.sourceHandle.endsWith(':left') ? 'left' : 'right')
+      a.targetHandle = erHandle(a.foreignKey.referencedColumns[0]!, a.targetHandle.endsWith(':right') ? 'right' : 'left')
+    }
+  })),
+  saveERForeignKey: (id, source, target, label, foreignKey, handles) => {
+    const diagram = getDiagramById(get().project.diagrams, get().currentDiagramId)
+    const from = diagram?.nodes.find(n => n.id === source), to = diagram?.nodes.find(n => n.id === target)
+    if (diagram?.type !== 'er' || from?.kind !== 'erTable' || to?.kind !== 'erTable' || !foreignKey.columns.length || foreignKey.columns.length !== foreignKey.referencedColumns.length || foreignKey.columns.some(c => !from.table.columns.some(col => col.id === c)) || foreignKey.referencedColumns.some(c => !to.table.columns.some(col => col.id === c))) return false
+    set(state => applyMutation(state, draft => {
+      const active = getDiagramById(draft.project.diagrams, draft.currentDiagramId)!
+      const previous = active.arrows.find(a => a.id === id)
+      const arrow: DiagramArrow = { id: id ?? createId('fk'), arrowType: 'relation', source, target, sourceHandle: handles?.sourceHandle ?? erHandle(foreignKey.columns[0]!, previous ? (previous.sourceHandle.endsWith(':left') ? 'left' : 'right') : (from.id === to.id || from.position.x <= to.position.x ? 'right' : 'left')), targetHandle: handles?.targetHandle ?? erHandle(foreignKey.referencedColumns[0]!, previous ? (previous.targetHandle.endsWith(':right') ? 'right' : 'left') : (from.id === to.id || from.position.x <= to.position.x ? 'left' : 'right')), label, foreignKey: structuredClone(foreignKey), routeOffset: previous?.routeOffset }
+      if (previous) active.arrows[active.arrows.indexOf(previous)] = arrow
+      else active.arrows.push(arrow)
+      draft.selection = { nodeIds: [], arrowIds: [arrow.id] }
+      draft.selectedElement = { kind: 'arrow', id: arrow.id }
+    }))
+    return true
+  },
   addFlowchartNode: (shape, position) => set(state => applyMutation(state, draft => {
     const diagram = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
     if (diagram?.type !== 'flowchart') return
@@ -181,14 +226,24 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
     const d = getDiagramById(draft.project.diagrams, draft.currentDiagramId)
     if (!d || !state.clipboard || state.clipboard.type !== d.type) return
     const mapping = new Map<string, string>()
+    const columns = new Map<string, string>()
     for (const n of state.clipboard.nodes) {
       if (d.isContext && n.kind === 'function' && d.nodes.some(node => node.kind === 'function')) continue
-      const copy = { ...n, id: createId('node'), diagramId: d.id, position: { x: n.position.x + 40, y: n.position.y + 40 }, childDiagramId: null }
+      const copy = { ...structuredClone(n), id: createId('node'), diagramId: d.id, position: { x: n.position.x + 40, y: n.position.y + 40 }, childDiagramId: null }
       if (n.kind === 'function') copy.nodeNumber = createFunctionNode(d, undefined, copy.position).nodeNumber
+      if (copy.kind === 'erTable') {
+        let suffix = 1
+        const base = (copy.name || 'table') + '_copy'
+        copy.name = base
+        while (d.nodes.some(n => n.kind === 'erTable' && n.table.schema === copy.table.schema && n.name === copy.name)) copy.name = `${base}_${suffix++}`
+        for (const c of copy.table.columns) { const id = createId('column'); columns.set(c.id, id); c.id = id }
+        for (const i of copy.table.indexes) { i.id = createId('index'); i.name = ''; i.columns = i.columns.map(id => columns.get(id)!); i.include = i.include.map(id => columns.get(id)!) }
+        for (const c of copy.table.checks) { c.id = createId('check'); c.name = '' }
+      }
       mapping.set(n.id, copy.id)
       d.nodes.push(copy)
     }
-    for (const a of state.clipboard.arrows) if (mapping.has(a.source) && mapping.has(a.target)) d.arrows.push({ ...a, id: createId('arrow'), source: mapping.get(a.source)!, target: mapping.get(a.target)! })
+    for (const a of state.clipboard.arrows) if (mapping.has(a.source) && mapping.has(a.target)) d.arrows.push({ ...a, id: createId('arrow'), source: mapping.get(a.source)!, target: mapping.get(a.target)!, ...(a.foreignKey ? { label: '', foreignKey: { ...a.foreignKey, columns: a.foreignKey.columns.map(id => columns.get(id)!), referencedColumns: a.foreignKey.referencedColumns.map(id => columns.get(id)!) }, sourceHandle: erHandle(columns.get(handleColumn(a.sourceHandle))!, a.sourceHandle.endsWith(':left') ? 'left' : 'right'), targetHandle: erHandle(columns.get(handleColumn(a.targetHandle))!, a.targetHandle.endsWith(':right') ? 'right' : 'left') } : {}) })
     if (!mapping.size) return
     draft.selection = { nodeIds: [...mapping.values()], arrowIds: [] }
     draft.selectedElement = { kind: 'node', id: [...mapping.values()][0]! }
@@ -433,6 +488,12 @@ export const useIdef0Store = create<Idef0Store>((set, get) => ({
 
     const source = getNodeById(diagram, connection.source)
     const target = getNodeById(diagram, connection.target)
+    if (diagram.type === 'er') {
+      const from = handleColumn(connection.sourceHandle), to = handleColumn(connection.targetHandle)
+      if (diagram.arrows.some(a => a.source === source?.id && a.target === target?.id && a.foreignKey?.columns.join() === from && a.foreignKey.referencedColumns.join() === to)) return { ok: false, message: 'Такой внешний ключ уже существует.' }
+      const ok = get().saveERForeignKey(null, connection.source, connection.target, '', newForeignKey(from, to), connection)
+      return { ok, message: ok ? undefined : 'Соедините колонку внешнего ключа с колонкой родительской таблицы.' }
+    }
     if (!source || !target || source.id === target.id) {
       return { ok: false, message: 'Нельзя соединить элемент сам с собой.' }
     }

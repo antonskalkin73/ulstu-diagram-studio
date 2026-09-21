@@ -1,3 +1,4 @@
+import { validateER } from '@/features/er/validateER'
 import { validateFlowchart } from '@/features/flowchart/validateFlowchart'
 import type { EditorProject, ValidationIssue } from '@/types/diagram'
 import {
@@ -12,6 +13,7 @@ export const validateProject = (project: EditorProject): ValidationIssue[] => {
   const issues: ValidationIssue[] = []
 
   project.diagrams.forEach((diagram) => {
+    if (diagram.type === 'er') { issues.push(...validateER(diagram)); return }
     if (diagram.type === 'flowchart') { issues.push(...validateFlowchart(diagram)); return }
     diagram.nodes.forEach((node) => {
       if (node.kind === 'function') {

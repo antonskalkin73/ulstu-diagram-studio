@@ -9,19 +9,19 @@ import { getNextFunctionNumber } from '@/utils/idef0'
 
 const now = (): string => new Date().toISOString()
 
-export const createEmptyProject = (type: 'idef0' | 'flowchart' = 'idef0'): EditorProject => {
+export const createEmptyProject = (type: 'idef0' | 'flowchart' | 'er' = 'idef0'): EditorProject => {
   const rootDiagramId = createId('diagram')
 
   return {
     id: createId('project'),
     name: 'Новый проект',
-    version: '3.0.0',
+    version: '4.0.0',
     rootDiagramId,
     diagrams: [
       {
         id: rootDiagramId,
         type,
-        title: type === 'idef0' ? 'Контекстная диаграмма' : 'Блок-схема',
+        title: type === 'idef0' ? 'Контекстная диаграмма' : type === 'er' ? 'Схема данных' : 'Блок-схема',
         nodeNumber: type === 'idef0' ? 'A-0' : '',
         parentDiagramId: null,
         parentNodeId: null,

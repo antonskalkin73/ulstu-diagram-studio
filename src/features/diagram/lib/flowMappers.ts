@@ -47,10 +47,10 @@ export const toFlowEdges = (diagram: EditorDiagram): FlowEdge[] =>
       type: MarkerType.ArrowClosed,
       width: 18,
       height: 18,
-      color: (arrow.arrowType === 'sequence' ? '#475569' : ARROW_TYPE_COLORS[arrow.arrowType]),
+      color: ((arrow.arrowType === 'sequence' || arrow.arrowType === 'relation') ? '#475569' : ARROW_TYPE_COLORS[arrow.arrowType]),
     },
     style: {
-      stroke: (arrow.arrowType === 'sequence' ? '#475569' : ARROW_TYPE_COLORS[arrow.arrowType]),
+      stroke: ((arrow.arrowType === 'sequence' || arrow.arrowType === 'relation') ? '#475569' : ARROW_TYPE_COLORS[arrow.arrowType]),
       strokeWidth: 2.5,
     },
   }))

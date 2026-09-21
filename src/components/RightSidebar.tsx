@@ -102,7 +102,7 @@ export const RightSidebar = () => {
             </label>
             <label className="block text-sm text-slate-600">
               <span className="mb-1 block">Тип стрелки</span>
-              <input className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2" value={selectedArrow.arrowType === 'sequence' ? 'Переход' : ARROW_TYPE_LABELS[selectedArrow.arrowType]} disabled />
+              <input className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2" value={(selectedArrow.arrowType === 'sequence' || selectedArrow.arrowType === 'relation') ? 'Переход' : ARROW_TYPE_LABELS[selectedArrow.arrowType]} disabled />
             </label>
           </div>
         ) : (

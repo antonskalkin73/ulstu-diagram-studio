@@ -1,3 +1,4 @@
+import { ERInspector } from '@/features/er/ERInspector'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { Database, FileUp, GitBranch, Plus, Shapes, Trash2, X } from 'lucide-react'
@@ -16,6 +17,8 @@ import type { EditorProject } from '@/types/diagram'
 const DiagramEditor = lazy(() => import('@/features/diagram/ui/DiagramEditor').then(module => ({ default: module.DiagramEditor })))
 
 const FlowchartEditor = lazy(() => import('@/features/flowchart/FlowchartEditor').then(module => ({ default: module.FlowchartEditor })))
+
+const EREditor = lazy(() => import('@/features/er/EREditor').then(module => ({ default: module.EREditor })))
 
 const editable = (target: EventTarget | null) => target instanceof HTMLElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)
 
@@ -158,7 +161,7 @@ export default function App() {
       </section>
       <div className="section-heading">Ваши проекты <span>{projects.length}</span></div>
       {loading ? <p role="status">Загрузка проектов…</p> : projects.length === 0 ? <div className="empty-projects"><GitBranch size={28} /><h2>Здесь появятся ваши проекты</h2><p>Создайте первый проект или откройте существующий JSON-файл.</p></div> : <div className="project-grid">{projects.map(item => <article className="project-card" key={item.id}>
-        <button className="project-card-open" onClick={() => openProject(item)}><div className="card-preview"><GitBranch size={36} /><span>{[...new Set(item.diagrams.map(d => d.type === 'idef0' ? 'IDEF0' : 'Блок-схема'))].join(' · ')}</span></div><h2>{item.name || 'Без названия'}</h2><p>{item.diagrams.length} диаграмм · {new Date(item.meta.updatedAt).toLocaleDateString('ru-RU')}</p></button>
+        <button className="project-card-open" onClick={() => openProject(item)}><div className="card-preview"><GitBranch size={36} /><span>{[...new Set(item.diagrams.map(d => d.type === 'idef0' ? 'IDEF0' : d.type === 'er' ? 'ERD' : 'Блок-схема'))].join(' · ')}</span></div><h2>{item.name || 'Без названия'}</h2><p>{item.diagrams.length} диаграмм · {new Date(item.meta.updatedAt).toLocaleDateString('ru-RU')}</p></button>
         <button className="card-delete icon-button" aria-label={`Удалить проект ${item.name}`} onClick={async () => {
           if (!window.confirm(`Удалить локальный проект «${item.name}»? Это действие нельзя отменить.`)) return
           try { await deleteStoredProject(item.id); setProjects(await listStoredProjects()) } catch (e) { setError(String(e)) }
@@ -169,7 +172,7 @@ export default function App() {
       <TopBar name={project.name} onName={state.setProjectName} status={exporting ? 'Подготовка экспорта…' : saveError ? 'Не удалось сохранить' : savedProject === project ? 'Сохранено в браузере' : 'Сохранение…'} onHome={() => void goHome()} onSave={() => downloadProjectJson(project)} onExport={type => void exportDiagram(type)} onUndo={state.undo} onRedo={state.redo} canUndo={state.past.length > 0} canRedo={state.future.length > 0} onLeft={workspace.toggleLeft} onRight={workspace.toggleRight}>
         <div className="tabs" role="tablist" aria-label="Открытые диаграммы">{tabs.map(id => {
             const diagram = project.diagrams.find(d => d.id === id)!
-            return <div className={`tab ${id === state.currentDiagramId ? 'active' : ''}`} key={id}><button role="tab" aria-selected={id === state.currentDiagramId} onClick={() => openDiagram(id)}><span>{diagram.type === 'idef0' ? 'IDEF0' : 'Блок-схема'}</span>{diagram.title}</button><button aria-label={`Закрыть вкладку ${diagram.title}`} onClick={() => closeTab(id)}><X size={13} /></button></div>
+            return <div className={`tab ${id === state.currentDiagramId ? 'active' : ''}`} key={id}><button role="tab" aria-selected={id === state.currentDiagramId} onClick={() => openDiagram(id)}><span>{diagram.type === 'idef0' ? 'IDEF0' : diagram.type === 'er' ? 'ERD' : 'Блок-схема'}</span>{diagram.title}</button><button aria-label={`Закрыть вкладку ${diagram.title}`} onClick={() => closeTab(id)}><X size={13} /></button></div>
           })}<button className="icon-button" onClick={() => setChooser('diagram')} aria-label="Новая диаграмма"><Plus size={17} /></button></div>
       </TopBar>
       <div className="editor-body">
@@ -177,7 +180,7 @@ export default function App() {
           if (window.confirm('Удалить диаграмму и все её декомпозиции? Действие можно отменить.')) state.deleteDiagram(id)
         }} />}
         <main className="editor-main">
-          {current ? <Suspense fallback={<div className="no-diagram" role="status">Загрузка редактора…</div>}>{current.type === 'flowchart' ? <FlowchartEditor key={project.id + current.id} /> : <DiagramEditor key={project.id + current.id} />}</Suspense> : <div className="no-diagram"><Shapes size={40} /><h2>Откройте диаграмму из дерева</h2><p>Закрытые вкладки остаются в проекте.</p><button className="button" onClick={() => openDiagram(project.rootDiagramId)}>Открыть корневую диаграмму</button></div>}
+          {current ? <Suspense fallback={<div className="no-diagram" role="status">Загрузка редактора…</div>}>{current.type === 'er' ? <EREditor key={project.id + current.id} /> : current.type === 'flowchart' ? <FlowchartEditor key={project.id + current.id} /> : <DiagramEditor key={project.id + current.id} />}</Suspense> : <div className="no-diagram"><Shapes size={40} /><h2>Откройте диаграмму из дерева</h2><p>Закрытые вкладки остаются в проекте.</p><button className="button" onClick={() => openDiagram(project.rootDiagramId)}>Открыть корневую диаграмму</button></div>}
           <div className="problems-panel"><button className="problems-toggle" onClick={() => setProblems(!problems)}>{problems ? '▾' : '▸'} Проверка модели <span>{state.issues.filter(i => i.severity === 'error').length} ошибок</span><span>{state.issues.filter(i => i.severity === 'warning').length} предупреждений</span></button>
             {problems && <div className="problems-list">{state.issues.length === 0 ? <p>Проблем не найдено.</p> : state.issues.map(issue => <button key={issue.id} onClick={() => {
               openDiagram(issue.diagramId)
@@ -185,17 +188,16 @@ export default function App() {
             }}><span className={issue.severity}>{issue.severity === 'error' ? '●' : '▲'}</span><span>{issue.message}</span><small>{project.diagrams.find(d => d.id === issue.diagramId)?.nodeNumber}</small></button>)}</div>}
           </div>
         </main>
-        {workspace.right && current && <RightSidebar key={state.selectedElement?.id ?? current.id} />}
+        {workspace.right && current && (current.type === 'er' ? <ERInspector key={state.selectedElement?.id ?? current.id} /> : <RightSidebar key={state.selectedElement?.id ?? current.id} />)}
       </div>
     </>}
     {chooser && <div className="modal-backdrop" onClick={() => setChooser(null)}><section className="type-dialog" role="dialog" aria-modal="true" aria-label="Выбор типа диаграммы" onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === 'Escape') setChooser(null) }}>
       <div className="dialog-heading"><div><div className="eyebrow">НОВАЯ ДИАГРАММА</div><h2>Что будем проектировать?</h2></div><button className="icon-button" aria-label="Закрыть" autoFocus onClick={() => setChooser(null)}><X size={20} /></button></div>
       {diagramCatalog.map(kind => <button className="type-option" key={kind.type} disabled={!kind.available} onClick={() => {
-        if (kind.type === 'er') return
         if (chooser === 'project') openProject(createEmptyProject(kind.type)); else state.addDiagram(kind.type)
         setChooser(null)
       }}><span className="type-symbol">{kind.type === 'er' ? <Database /> : kind.type === 'flowchart' ? <Shapes /> : <GitBranch />}</span><span><strong>{kind.title}</strong><small>{kind.description}</small></span><span className="type-badge">{kind.available ? 'Создать →' : 'Скоро'}</span></button>)}
-      <p className="dialog-note">В одном проекте можно сочетать IDEF0 и блок-схемы. Редактор ERD появится позже.</p>
+      <p className="dialog-note">В одном проекте можно сочетать IDEF0, блок-схемы и физические ER-диаграммы PostgreSQL 18.</p>
     </section></div>}
   </div>
 }

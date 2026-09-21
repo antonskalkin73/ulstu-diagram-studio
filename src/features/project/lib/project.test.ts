@@ -17,7 +17,7 @@ describe('Project files', () => {
     const legacy = JSON.parse(serializeProject(project))
     legacy.version = '1.0.0'; delete legacy.diagrams[0].type
     expect(parseProjectJson(JSON.stringify(legacy)).diagrams[0]?.type).toBe('idef0')
-    expect(parseProjectJson(JSON.stringify(legacy)).version).toBe('3.0.0')
+    expect(parseProjectJson(JSON.stringify(legacy)).version).toBe('4.0.0')
   })
   it('rejects unknown versions, malformed data, orphan references and cycles', () => {
     const project = createEmptyProject()

@@ -21,5 +21,5 @@ export interface Project<TDiagram extends DiagramIdentity = EditorDiagram> {
 export const diagramCatalog = [
   { type: 'idef0', title: 'IDEF0', description: 'Функции системы и их декомпозиция', available: true },
   { type: 'flowchart', title: 'Блок-схема', description: 'Алгоритмы и последовательности действий', available: true },
-  { type: 'er', title: 'ERD', description: 'Сущности, атрибуты и связи данных', available: false },
+  { type: 'er', title: 'ERD', description: 'Физическая схема PostgreSQL 18', available: true },
 ] as const

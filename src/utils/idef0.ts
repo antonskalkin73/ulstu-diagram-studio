@@ -88,7 +88,7 @@ export const getArrowTypeFromHandles = (
 export const isArrowSemanticallyValid = (
   source: DiagramNode,
   target: DiagramNode,
-  arrowType: ArrowType | 'sequence',
+  arrowType: ArrowType | 'sequence' | 'relation',
   sourceHandle: string,
   targetHandle: string,
 ): boolean => {

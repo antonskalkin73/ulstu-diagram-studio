@@ -32,7 +32,7 @@ export const ArrowEdge = ({
   })
 
   const arrow = data?.arrow
-  const color = arrow ? (arrow.arrowType === 'sequence' ? '#475569' : ARROW_TYPE_COLORS[arrow.arrowType]) : '#2563eb'
+  const color = arrow ? ((arrow.arrowType === 'sequence' || arrow.arrowType === 'relation') ? '#475569' : ARROW_TYPE_COLORS[arrow.arrowType]) : '#2563eb'
 
   return (
     <>
