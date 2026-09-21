@@ -1,7 +1,7 @@
+import { flowchartHandleInset, flowchartOutline } from '@/features/flowchart/geometry'
+import { getArrowLabel, getBoundaryPoint, getDiagramFrame } from '@/features/diagram/lib/diagramGeometry'
 import { getSmoothStepPath, Position } from '@xyflow/react'
-import jsPDF from 'jspdf'
-import 'svg2pdf.js'
-import type { IDEF0Diagram, IDEF0Node } from '@/types/idef0'
+import type { EditorDiagram, DiagramNode } from '@/types/diagram'
 import { ARROW_TYPE_COLORS } from '@/entities/idef0/constants'
 import { downloadBlob, downloadTextFile } from '@/utils/idef0'
 
@@ -18,11 +18,13 @@ async function loadFont() {
   }).catch(error => { fontPromise = undefined; throw error })
   return fontPromise
 }
-function endpoint(node: IDEF0Node, handle: string) {
+function endpoint(node: DiagramNode, handle: string, frame: ReturnType<typeof getDiagramFrame>) {
   const side = node.kind === 'boundaryPort' ? (node.boundaryRole === 'output' ? Position.Left : node.boundaryRole === 'control' ? Position.Bottom : node.boundaryRole === 'mechanism' ? Position.Top : Position.Right)
-    : handle.includes('control') ? Position.Top : handle.includes('mechanism') ? Position.Bottom
+    : node.kind === 'flowchart' ? handle as Position : handle.includes('control') ? Position.Top : handle.includes('mechanism') ? Position.Bottom
     : handle.includes('input') ? Position.Left : Position.Right
-  return { x: node.position.x + (side === Position.Left ? 0 : side === Position.Right ? node.width : node.width / 2),
+  if (node.kind === 'boundaryPort') return { ...getBoundaryPoint(node, frame), side }
+  const inset = flowchartHandleInset(node.shape, side)
+  return { x: node.position.x + (side === Position.Left ? inset : side === Position.Right ? node.width - inset : node.width / 2),
     y: node.position.y + (side === Position.Top ? 0 : side === Position.Bottom ? node.height : node.height / 2), side }
 }
 function wrap(text: string, width: number) {
@@ -42,48 +44,61 @@ function wrap(text: string, width: number) {
   }
   return lines
 }
-export function buildDiagramSvg(diagram: IDEF0Diagram) {
+export function buildDiagramSvg(diagram: EditorDiagram) {
   const nodes = new Map(diagram.nodes.map(n => [n.id, n]))
+  const frame = diagram.type === 'flowchart' && diagram.nodes.length ? (() => {
+    const x = Math.min(...diagram.nodes.map(n => n.position.x)) - 40, y = Math.min(...diagram.nodes.map(n => n.position.y)) - 40
+    return { x, y, width: Math.max(...diagram.nodes.map(n => n.position.x + n.width)) - x + 40, height: Math.max(...diagram.nodes.map(n => n.position.y + n.height)) - y + 40 }
+  })() : getDiagramFrame(diagram)
   const geometry: string[] = []
-  let minX = Math.min(0, ...diagram.nodes.map(n => n.position.x))
-  let minY = Math.min(0, ...diagram.nodes.map(n => n.position.y))
-  let maxX = Math.max(600, ...diagram.nodes.map(n => n.position.x + n.width))
-  let maxY = Math.max(400, ...diagram.nodes.map(n => n.position.y + n.height))
+  let minX = frame.x, minY = frame.y
+  let maxX = frame.x + frame.width, maxY = frame.y + frame.height
   for (const arrow of diagram.arrows) {
     const from = nodes.get(arrow.source), to = nodes.get(arrow.target)
     if (!from || !to) continue
-    const source = endpoint(from, arrow.sourceHandle), target = endpoint(to, arrow.targetHandle)
+    const source = endpoint(from, arrow.sourceHandle, frame), target = endpoint(to, arrow.targetHandle, frame)
     const cx = (source.x + target.x) / 2 + (arrow.routeOffset ?? 0), cy = (source.y + target.y) / 2 + (arrow.routeOffset ?? 0)
     const [path, x, y] = getSmoothStepPath({ sourceX: source.x, sourceY: source.y, targetX: target.x, targetY: target.y, sourcePosition: source.side, targetPosition: target.side, borderRadius: 0, offset: 30, centerX: cx, centerY: cy })
-    const color = ARROW_TYPE_COLORS[arrow.arrowType]
-    const labelWidth = Math.max(40, arrow.label.length * 8)
+    const color = (arrow.arrowType === 'sequence' ? '#475569' : ARROW_TYPE_COLORS[arrow.arrowType])
+    const label = getArrowLabel(arrow, diagram)
+    const labelWidth = Math.max(40, label.length * 8)
     minX = Math.min(minX, cx - 60, x - labelWidth / 2); maxX = Math.max(maxX, cx + 60, x + labelWidth / 2)
     minY = Math.min(minY, cy - 60, y - 25); maxY = Math.max(maxY, cy + 60, y + 25)
     const rotation = target.side === Position.Left ? 0 : target.side === Position.Right ? 180 : target.side === Position.Top ? 90 : -90
     geometry.push(`<path d="${path}" fill="none" stroke="${color}" stroke-width="2"/><path d="M 0 0 L -10 -5 L -10 5 Z" fill="${color}" transform="translate(${target.x} ${target.y}) rotate(${rotation})"/>`)
-    if (arrow.label) geometry.push(`<rect x="${x - labelWidth / 2}" y="${y - 11}" width="${labelWidth}" height="22" fill="white"/><text x="${x}" y="${y + 4}" text-anchor="middle" font-size="12">${escape(arrow.label)}</text>`)
+    if (label) geometry.push(`<rect x="${x - labelWidth / 2}" y="${y - 11}" width="${labelWidth}" height="22" fill="white"/><text x="${x}" y="${y + 4}" text-anchor="middle" font-size="12">${escape(label)}</text>`)
   }
   for (const node of diagram.nodes) {
+    if (node.kind === 'boundaryPort') continue
     const { x, y } = node.position
-    const color = node.kind === 'boundaryPort' ? '#64748b' : '#334155'
-    geometry.push(`<rect x="${x}" y="${y}" width="${node.width}" height="${node.height}" rx="${node.kind === 'function' ? 2 : 8}" fill="white" stroke="${color}" stroke-width="1.5"/>`)
-    if (node.nodeNumber) geometry.push(`<text x="${x + 10}" y="${y + 19}" font-size="11" fill="#64748b">${escape(node.nodeNumber)}</text>`)
-    const lines = wrap(node.name, node.width - 24)
-    const available = Math.max(1, Math.floor((node.height - 30) / 17))
+    const color = '#334155'
+    if (node.kind === 'flowchart') {
+      const shape = node.shape ?? 'process'
+      const fill = shape === 'start' ? '#f0fdf4' : shape === 'end' ? '#fff1f2' : shape === 'decision' ? '#fffbeb' : 'white'
+      geometry.push(`<path d="${flowchartOutline(shape, node.width, node.height)}" transform="translate(${x} ${y})" fill="${fill}" stroke="${color}" stroke-width="1.7"/>`)
+      if (shape === 'subprocess') geometry.push(`<path d="M ${x + 14} ${y} V ${y + node.height} M ${x + node.width - 14} ${y} V ${y + node.height}" fill="none" stroke="${color}" stroke-width="1.7"/>`)
+    } else {
+    geometry.push(`<rect x="${x}" y="${y}" width="${node.width}" height="${node.height}" rx="0" fill="white" stroke="${color}" stroke-width="1.5"/>`)
+    }
+    if (node.nodeNumber) geometry.push(`<text x="${x + node.width - 12}" y="${y + node.height - 10}" text-anchor="end" font-size="11" fill="#64748b">${escape(node.nodeNumber)}</text>`)
+    const lines = wrap(node.name, node.width - (node.shape === 'decision' ? 100 : node.kind === 'flowchart' ? 48 : 24))
+    const available = Math.max(1, Math.floor((node.height - (node.shape === 'decision' ? 80 : 30)) / 17))
     const visible = lines.slice(0, available)
     if (lines.length > available) visible[available - 1] = visible[available - 1]!.slice(0, -1) + '…'
     visible.forEach((line, i) => geometry.push(`<text x="${x + node.width / 2}" y="${y + node.height / 2 + 5 + (i - (visible.length - 1) / 2) * 17}" text-anchor="middle" font-size="13">${escape(line)}</text>`))
   }
   const width = maxX - minX + 120, height = maxY - minY + 160
-  return { width, height, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="white"/><g font-family="${fontFamily}" font-weight="normal" fill="#233047"><text x="60" y="32" font-size="16">${escape(diagram.nodeNumber + ' · ' + diagram.title)}</text><g transform="translate(${60 - minX} ${80 - minY})">${geometry.join('')}</g></g></svg>` }
+  return { width, height, svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="white"/><g font-family="${fontFamily}" font-weight="normal" fill="#233047"><text x="60" y="32" font-size="16">${escape((diagram.type === 'flowchart' ? 'Блок-схема' : diagram.nodeNumber) + ' · ' + diagram.title)}</text><g transform="translate(${60 - minX} ${80 - minY})">${geometry.join('')}</g></g></svg>` }
 }
 
-export async function exportDiagrams(diagrams: IDEF0Diagram[], type: 'png' | 'svg' | 'pdf', name: string) {
+export async function exportDiagrams(diagrams: EditorDiagram[], type: 'png' | 'svg' | 'pdf', name: string) {
   if (!diagrams.length) throw new Error('Нет диаграмм для экспорта')
   const filename = name.replace(/[<>:"/\\|?*]/g, '-').trim() || 'project'
   const font = await loadFont()
   const images = diagrams.map(buildDiagramSvg)
   if (type === 'pdf') {
+    const { default: jsPDF } = await import('jspdf')
+    await import('svg2pdf.js')
     const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
     pdf.addFileToVFS('NotoSans-Regular.ttf', font)
     pdf.addFont('NotoSans-Regular.ttf', fontFamily, 'normal')

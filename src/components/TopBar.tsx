@@ -1,6 +1,8 @@
+import type { ReactNode } from 'react'
 import { ArrowLeft, Download, PanelLeft, PanelRight, Redo2, Undo2 } from 'lucide-react'
 import { CommitInput } from './CommitInput'
-export function TopBar({ name, status, onName, onHome, onSave, onExport, onUndo, onRedo, canUndo, canRedo, onLeft, onRight }: {
+export function TopBar({ name, status, onName, onHome, onSave, onExport, onUndo, onRedo, canUndo, canRedo, onLeft, onRight, children }: {
+  children: ReactNode
   name: string; status: string; onName: (value: string) => void; onHome: () => void; onSave: () => void;
   onExport: (type: 'png' | 'svg' | 'pdf' | 'all') => void; onUndo: () => void; onRedo: () => void;
   canUndo: boolean; canRedo: boolean; onLeft: () => void; onRight: () => void
@@ -8,6 +10,7 @@ export function TopBar({ name, status, onName, onHome, onSave, onExport, onUndo,
   return <header className="editor-header">
     <button className="icon-button" onClick={onHome} title="Все проекты" aria-label="Все проекты"><ArrowLeft size={19} /></button>
     <div className="project-heading"><CommitInput value={name} onCommit={onName} aria-label="Название проекта" /><small role="status">{status}</small></div>
+    {children}
     <div className="header-actions">
       <button className="icon-button" onClick={onUndo} disabled={!canUndo} title="Отменить · Ctrl+Z" aria-label="Отменить"><Undo2 size={17} /></button>
       <button className="icon-button" onClick={onRedo} disabled={!canRedo} title="Повторить · Ctrl+Shift+Z" aria-label="Повторить"><Redo2 size={17} /></button>

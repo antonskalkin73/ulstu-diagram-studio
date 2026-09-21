@@ -1,7 +1,7 @@
 import type { ArrowType } from '@/types/idef0'
 
 export const FUNCTION_NODE_SIZE = { width: 220, height: 120 }
-export const BOUNDARY_NODE_SIZE = { width: 140, height: 56 }
+export const BOUNDARY_NODE_SIZE = { width: 8, height: 8 }
 export const SNAP_GRID: [number, number] = [20, 20]
 
 export const FUNCTION_HANDLES = {

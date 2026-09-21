@@ -116,3 +116,49 @@ h1 span { color:#6c7d97; }
 .react-flow__controls,.react-flow__minimap { border-radius:8px; overflow:hidden; box-shadow:0 4px 18px #1b355419; }
 @media(max-width:1100px) { .project-tree { width:200px; flex-basis:200px; } .inspector { width:230px; flex-basis:230px; } }
 @media(max-width:800px) { .project-tree,.inspector { position:absolute; top:76px; bottom:0; z-index:15; box-shadow:0 5px 30px #20355225; } .project-tree { left:0; } .inspector { right:0; } .editor-header { gap:4px; padding:10px 6px; } .header-actions { gap:0; } .header-actions .separator { display:none; } .home-intro { padding-top:35px; } .local-badge { display:none; } .canvas-toolbar label { display:none; } }
+
+.boundary-anchor { width:8px; height:8px; }
+.boundary-anchor .react-flow__handle { background:#64748b; border:1px solid white; opacity:.3; }
+.boundary-anchor:hover .react-flow__handle,.boundary-anchor.is-selected .react-flow__handle { opacity:1; background:#315ee8; }
+.node-name::placeholder { color:#94a3b8; font-weight:400; }
+
+/* Shared project header: title, scrollable diagram tabs, then actions. */
+.editor-header { gap:10px; padding:8px 12px; min-height:60px; }
+.editor-header .project-heading { flex:0 1 180px; min-width:105px; }
+.editor-header .tabs { flex:1 1 0; min-width:70px; background:transparent; border:0; }
+.editor-header .tab { min-height:38px; height:38px; border:1px solid transparent; border-radius:7px; margin-right:3px; }
+.editor-header .tab.active { background:#eef3ff; border-color:#dce6ff; box-shadow:none; }
+.editor-header .tab button[role=tab] { height:36px; }
+.header-actions { flex-shrink:0; }
+.boundary-zones { position:absolute; inset:0; pointer-events:none; z-index:5; }
+.boundary-zone { position:absolute; border:0; padding:0; background:#dbe5f04d; color:#7489a4; font-size:10px; pointer-events:auto; touch-action:none; }
+.boundary-zone:hover { background:#bdd1fa80; color:#315ee8; }
+.boundary-zone-input { top:36px; bottom:36px; left:0; width:36px; }
+.boundary-zone-output { top:36px; bottom:36px; right:0; width:36px; }
+.boundary-zone-control { top:0; left:36px; right:36px; height:36px; }
+.boundary-zone-mechanism { bottom:0; left:36px; right:36px; height:36px; }
+.boundary-zone-input span,.boundary-zone-output span { writing-mode:vertical-rl; }
+.boundary-preview { position:absolute; inset:0; width:100%; height:100%; overflow:visible; pointer-events:none; }
+.canvas-area .react-flow__controls { left:40px; bottom:40px; }
+.canvas-area .react-flow__minimap { right:40px; bottom:40px; }
+@media(max-width:800px) { .editor-header { flex-wrap:wrap; } .editor-header .tabs { order:3; flex-basis:100%; } .editor-header .project-heading { flex:1; } .project-tree,.inspector { top:106px; } }
+
+/* Flowcharts share the workspace, but have their own notation and palette. */
+.flowchart-heading { display:flex; align-items:center; gap:20px; padding:12px 16px; border-bottom:1px solid #e2e8f0; background:white; font-size:13px; }
+.flowchart-heading span { color:#64748b; font-size:12px; }
+.flowchart-palette button { color:#334155; background:#f1f5f9; border:1px solid #e2e8f0; }
+.flowchart-node { position:relative; }
+.flowchart-outline { position:absolute; inset:0; overflow:visible; fill:white; stroke:#475569; stroke-width:1.7; filter:drop-shadow(0 2px 3px #0f172a12); }
+.flowchart-node.is-selected .flowchart-outline { stroke:#2563eb; stroke-width:2.5; }
+.shape-start .flowchart-outline { fill:#f0fdf4; }
+.shape-end .flowchart-outline { fill:#fff1f2; }
+.shape-decision .flowchart-outline { fill:#fffbeb; }
+.flowchart-text { position:absolute; inset:14px 24px; display:flex; align-items:center; justify-content:center; }
+.shape-decision .flowchart-text { inset:42px 48px; }
+.flowchart-text textarea { width:100%; height:100%; resize:none; border:0; outline:0; background:transparent; text-align:center; align-content:center; font-family:inherit; font-size:14px; line-height:1.3; font-weight:500; color:#1e293b; overflow:auto; }
+.flowchart-text textarea::placeholder { color:#94a3b8; font-weight:400; }
+.flowchart-node .react-flow__handle { width:9px; height:9px; background:#475569; border:2px solid white; }
+.flowchart-empty { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; pointer-events:none; text-align:center; color:#64748b; }
+.flowchart-empty h2 { font-size:19px; color:#334155; margin-bottom:10px; }
+.flowchart-message { display:flex; justify-content:space-between; gap:12px; background:#fffbeb; color:#92400e; padding:8px 16px; font-size:13px; }
+@media(max-width:900px) { .flowchart-heading span { display:none; } }

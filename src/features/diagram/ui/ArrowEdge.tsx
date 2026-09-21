@@ -1,7 +1,7 @@
 import { CommitInput } from '@/components/CommitInput'
 import { useIdef0Store } from '@/features/diagram/model/useIdef0Store'
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, type Edge, type EdgeProps } from '@xyflow/react'
-import { ARROW_TYPE_COLORS, ARROW_TYPE_LABELS } from '@/entities/idef0/constants'
+import { ARROW_TYPE_COLORS } from '@/entities/idef0/constants'
 import type { ArrowEdgeData } from '@/features/diagram/lib/flowMappers'
 
 type ArrowFlowEdge = Edge<ArrowEdgeData, 'idef0Arrow'>
@@ -32,19 +32,18 @@ export const ArrowEdge = ({
   })
 
   const arrow = data?.arrow
-  const color = arrow ? ARROW_TYPE_COLORS[arrow.arrowType] : '#2563eb'
+  const color = arrow ? (arrow.arrowType === 'sequence' ? '#475569' : ARROW_TYPE_COLORS[arrow.arrowType]) : '#2563eb'
 
   return (
     <>
       <BaseEdge id={id} path={path} markerEnd={markerEnd} style={{ stroke: color, strokeWidth: selected ? 3 : 2.5 }} />
-      {arrow ? (
+      {arrow && (arrow.arrowType !== 'sequence' || arrow.label || selected) ? (
         <EdgeLabelRenderer>
           <div
-            className="nodrag nopan absolute -translate-x-1/2 -translate-y-1/2 rounded border border-slate-300 bg-white/90 px-2 py-1 text-[11px] font-medium text-slate-700 shadow-sm"
-            style={{ pointerEvents: 'all', transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+            className="nodrag nopan absolute bg-white px-1 text-xs text-slate-800"
+            style={{ width: arrow.arrowType === 'sequence' ? selected ? 150 : Math.max(36, arrow.label.length * 7 + 12) : undefined, pointerEvents: 'all', transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
           >
-            <CommitInput className="node-name" aria-label="Подпись стрелки на холсте" value={arrow.label} onCommit={label => useIdef0Store.getState().updateArrow(arrow.id, { label })} />
-            <div className="text-[10px] uppercase text-slate-400">{ARROW_TYPE_LABELS[arrow.arrowType]}</div>
+            <CommitInput className="node-name" aria-label="Подпись стрелки на холсте" placeholder="Подпись стрелки" value={arrow.label} onCommit={label => useIdef0Store.getState().updateArrow(arrow.id, { label })} />
           </div>
         </EdgeLabelRenderer>
       ) : null}

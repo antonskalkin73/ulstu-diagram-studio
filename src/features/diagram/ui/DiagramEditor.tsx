@@ -1,3 +1,7 @@
+import { BoundaryZones } from './BoundaryZones'
+import { boundaryRoleAtPoint } from '@/features/diagram/lib/boundaryZones'
+import { FUNCTION_HANDLES } from '@/entities/idef0/constants'
+import { getBoundaryPosition, getDiagramFrame, getExternalArrowFunction } from '@/features/diagram/lib/diagramGeometry'
 import {
   Background,
   BackgroundVariant,
@@ -10,11 +14,12 @@ import {
   type Node,
   type NodeTypes,
   useReactFlow,
+  useViewport,
   useNodesState,
   useEdgesState,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkspace } from '@/features/project/lib/workspace'
 import { useShallow } from 'zustand/react/shallow'
 import { ARROW_TYPE_COLORS, ARROW_TYPE_LABELS, SNAP_GRID } from '@/entities/idef0/constants'
@@ -45,7 +50,7 @@ const EditorCanvas = () => {
     connectArrow,
     createContextFunction,
     addFunctionNode,
-    addBoundaryNode,
+    addExternalArrow,
     setSelection,
     setContextMenu,
     contextMenu,
@@ -58,7 +63,7 @@ const EditorCanvas = () => {
     connectArrow: state.connectArrow,
     createContextFunction: state.createContextFunction,
     addFunctionNode: state.addFunctionNode,
-    addBoundaryNode: state.addBoundaryNode,
+    addExternalArrow: state.addExternalArrow,
     setSelection: state.setSelection,
     setContextMenu: state.setContextMenu,
     contextMenu: state.contextMenu,
@@ -69,19 +74,73 @@ const EditorCanvas = () => {
     clipboard: state.clipboard,
   })))
 
-  const modelNodes = useMemo(() => diagram ? toFlowNodes(diagram) : [], [diagram])
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const viewport = useViewport()
+  const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 })
+  useEffect(() => {
+    const element = canvasRef.current
+    if (!element) return
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setCanvasSize(previous => previous.width === entry.contentRect.width && previous.height === entry.contentRect.height
+        ? previous : { width: entry.contentRect.width, height: entry.contentRect.height })
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+  const frame = useMemo(() => ({
+    x: (18 - viewport.x) / viewport.zoom, y: (18 - viewport.y) / viewport.zoom,
+    width: Math.max(60, canvasSize.width - 36) / viewport.zoom,
+    height: Math.max(60, canvasSize.height - 36) / viewport.zoom,
+  }), [viewport.x, viewport.y, viewport.zoom, canvasSize.width, canvasSize.height])
+  const modelNodes = useMemo(() => diagram ? toFlowNodes(diagram, frame) : [], [diagram, frame])
   const modelEdges = useMemo(() => diagram ? toFlowEdges(diagram) : [], [diagram])
   const [nodes, setNodes, onNodesChange] = useNodesState(modelNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(modelEdges)
   const viewportKey = `${project.id}:${diagram?.id}`
   const initialViewport = useMemo(() => useWorkspace.getState().viewports[viewportKey], [viewportKey])
   useEffect(() => {
-    setNodes(previous => modelNodes.map(node => ({ ...previous.find(n => n.id === node.id), ...node, selected: selection.nodeIds.includes(node.id) })))
+    setNodes(previous => modelNodes.map(node => ({ ...previous.find(n => n.id === node.id), ...node, position: previous.find(n => n.id === node.id)?.dragging ? previous.find(n => n.id === node.id)!.position : node.position, selected: selection.nodeIds.includes(node.id) })))
   }, [modelNodes, selection.nodeIds, setNodes])
   useEffect(() => {
     setEdges(modelEdges.map(edge => ({ ...edge, selected: selection.arrowIds.includes(edge.id) })))
   }, [modelEdges, selection.arrowIds, setEdges])
-  const commitPositions = () => useIdef0Store.getState().updateNodePositions(reactFlow.getNodes().map(n => ({ id: n.id, ...n.position })))
+  // SelectionChange also fires for controlled prop updates. Feeding it back into
+  // the model can alternate old/new selections forever. Only user change events
+  // update the model; programmatic selection travels to React Flow one way.
+  const handleNodesChange = useCallback((changes: Parameters<typeof onNodesChange>[0]) => {
+    const active = useIdef0Store.getState()
+    const diagram = active.project.diagrams.find(d => d.id === active.currentDiagramId)
+    const boundedChanges = changes.map(change => {
+      if (!diagram || change.type !== 'position' || !change.position) return change
+      const node = diagram.nodes.find(n => n.id === change.id)
+      return node?.kind === 'boundaryPort'
+        ? { ...change, position: getBoundaryPosition({ ...node, position: change.position }, frame) }
+        : change
+    })
+    onNodesChange(boundedChanges)
+    const selectedChanges = changes.filter(change => change.type === 'select')
+    if (!selectedChanges.length) return
+    const current = useIdef0Store.getState().selection
+    const ids = new Set(current.nodeIds)
+    for (const change of selectedChanges) {
+      if (change.selected) ids.add(change.id)
+      else ids.delete(change.id)
+    }
+    setSelection({ nodeIds: [...ids], arrowIds: current.arrowIds })
+  }, [onNodesChange, setSelection, frame])
+  const handleEdgesChange = useCallback((changes: Parameters<typeof onEdgesChange>[0]) => {
+    onEdgesChange(changes)
+    const selectedChanges = changes.filter(change => change.type === 'select')
+    if (!selectedChanges.length) return
+    const current = useIdef0Store.getState().selection
+    const ids = new Set(current.arrowIds)
+    for (const change of selectedChanges) {
+      if (change.selected) ids.add(change.id)
+      else ids.delete(change.id)
+    }
+    setSelection({ nodeIds: current.nodeIds, arrowIds: [...ids] })
+  }, [onEdgesChange, setSelection])
+  const commitPositions = (movedNodes: Node[]) => useIdef0Store.getState().updateNodePositions(movedNodes.map(n => ({ id: n.id, ...n.position })))
 
   const handlePaneContextMenu = useCallback(
     (event: MouseEvent | React.MouseEvent) => {
@@ -146,7 +205,7 @@ const EditorCanvas = () => {
       }
 
       if (action === 'input' || action === 'control' || action === 'output' || action === 'mechanism') {
-        addBoundaryNode(action, { x: contextMenu.flowX, y: contextMenu.flowY })
+        addExternalArrow(action)
       }
 
       if (action === 'delete' && contextMenu.targetId && contextMenu.kind !== 'pane') {
@@ -159,7 +218,7 @@ const EditorCanvas = () => {
 
       setContextMenu(null)
     },
-    [addBoundaryNode, addFunctionNode, contextMenu, createContextFunction, diagram, openDecomposition, removeElement, setContextMenu],
+    [addExternalArrow, addFunctionNode, contextMenu, createContextFunction, diagram, openDecomposition, removeElement, setContextMenu],
   )
 
   return (
@@ -188,7 +247,7 @@ const EditorCanvas = () => {
 
       <div className="canvas-toolbar">
         <button onClick={() => addFunctionNode(reactFlow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))} disabled={diagram?.isContext && diagram.nodes.some(n => n.kind === 'function')}>＋ Функция</button>
-        {(['input', 'control', 'output', 'mechanism'] as const).map(role => <button key={role} onClick={() => addBoundaryNode(role, reactFlow.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }))}>{ARROW_TYPE_LABELS[role]}</button>)}
+        {(['input', 'control', 'output', 'mechanism'] as const).map(role => <button key={role} disabled={!diagram || !getExternalArrowFunction(diagram, selection)} title="Добавить стрелку между границей листа и выбранной функцией" onClick={() => addExternalArrow(role)}>{ARROW_TYPE_LABELS[role]}</button>)}
         <span className="separator" />
         <button onClick={() => useIdef0Store.getState().duplicateSelection()} disabled={!selection.nodeIds.length} title="Дублировать выделенные элементы · Ctrl+D">Копия</button>
         <button onClick={() => useIdef0Store.getState().pasteSelection()} disabled={!clipboard} title="Вставить элементы · Ctrl+V">Вставить</button>
@@ -198,13 +257,13 @@ const EditorCanvas = () => {
         <label><input type="checkbox" checked={project.settings.showMiniMap} onChange={() => useIdef0Store.getState().toggleMiniMap()} /> Миникарта</label>
         <label><input type="checkbox" checked={project.settings.strictMode} onChange={() => useIdef0Store.getState().toggleStrictMode()} /> Строгий режим</label>
       </div>
-      <div className="canvas-area">
+      <div className="canvas-area" ref={canvasRef}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
-          fitView={!initialViewport}
+          onInit={instance => { if (!initialViewport && diagram) void instance.fitBounds(getDiagramFrame(diagram), { padding: 0.1 }) }}
           defaultViewport={initialViewport}
           minZoom={0.25}
           maxZoom={1.8}
@@ -212,10 +271,20 @@ const EditorCanvas = () => {
           snapGrid={SNAP_GRID}
           multiSelectionKeyCode={['Meta', 'Control']}
           deleteKeyCode={null}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onNodeDragStop={commitPositions}
-          onSelectionDragStop={commitPositions}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={handleEdgesChange}
+          onNodeDragStop={(_, node, dragged) => commitPositions(dragged.length ? dragged : [node])}
+          onSelectionDragStop={(_, dragged) => commitPositions(dragged)}
+          onConnectEnd={(event, connection) => {
+            if (connection.isValid || !canvasRef.current || !diagram) return
+            const node = diagram.nodes.find(n => n.id === connection.fromNode?.id && n.kind === 'function')
+            const pointer = 'changedTouches' in event ? event.changedTouches[0] : event
+            if (!node || !pointer) return
+            const rect = canvasRef.current.getBoundingClientRect()
+            const role = boundaryRoleAtPoint(pointer.clientX - rect.left, pointer.clientY - rect.top, rect.width, rect.height)
+            const handles = { input: FUNCTION_HANDLES.inputTarget, control: FUNCTION_HANDLES.controlTarget, output: FUNCTION_HANDLES.outputSource, mechanism: FUNCTION_HANDLES.mechanismTarget }
+            if (role && connection.fromHandle?.id === handles[role]) addExternalArrow(role, node.id, reactFlow.screenToFlowPosition({ x: pointer.clientX, y: pointer.clientY }))
+          }}
           onConnect={(connection) => {
             const result = connectArrow(connection)
             if (!result.ok && result.message) {
@@ -223,16 +292,6 @@ const EditorCanvas = () => {
             }
           }}
           onNodeDoubleClick={(_, node) => openDecomposition(node.id)}
-          onSelectionChange={({ nodes: selectedNodes, edges: selectedEdges }) => {
-            if (selectedNodes.length === 0 && selectedEdges.length === 0) {
-              return
-            }
-
-            setSelection({
-              nodeIds: selectedNodes.map((node) => node.id),
-              arrowIds: selectedEdges.map((edge) => edge.id),
-            })
-          }}
           onPaneContextMenu={handlePaneContextMenu}
           onNodeContextMenu={handleNodeContextMenu}
           onEdgeContextMenu={handleEdgeContextMenu}
@@ -245,22 +304,24 @@ const EditorCanvas = () => {
           <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="#cbd5e1" />
           {project.settings.showMiniMap ? (
             <MiniMap
+              style={{ right: 40, bottom: 40 }}
               pannable
               zoomable
-              nodeStrokeColor={() => '#475569'}
+              nodeStrokeColor={node => node.type === 'diagramFrame' ? '#cbd5e1' : '#475569'}
               nodeColor={() => '#ffffff'}
               maskColor="rgba(148, 163, 184, 0.16)"
             />
           ) : null}
-          <Controls showInteractive={false} />
+          <Controls showInteractive={false} style={{ left: 40, bottom: 40 }} />
         </ReactFlow>
+        <BoundaryZones canvasRef={canvasRef} onConnect={(role, nodeId, point) => addExternalArrow(role, nodeId, reactFlow.screenToFlowPosition(point))} />
 
         {diagram && diagram.nodes.length === 0 ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-6">
             <div className="pointer-events-auto max-w-md rounded-2xl border border-dashed border-slate-300 bg-white/95 p-6 text-center shadow-panel">
               <div className="text-lg font-semibold text-slate-900">Пустая диаграмма</div>
               <p className="mt-2 text-sm text-slate-500">
-                Создайте контекстную диаграмму или добавьте функции и интерфейсные стрелки IDEF0.
+                Добавьте функцию, затем используйте Input, Control, Output и Mechanism для стрелок от границ листа.
               </p>
               <div className="mt-4 flex flex-wrap justify-center gap-3">
                 <button
@@ -271,7 +332,8 @@ const EditorCanvas = () => {
                 </button>
                 <button
                   className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700"
-                  onClick={() => addBoundaryNode('input', { x: 80, y: 80 })}
+                  disabled
+                  title="Сначала создайте функцию"
                 >
                   Добавить Input
                 </button>
@@ -290,16 +352,16 @@ const EditorCanvas = () => {
                 <button className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100" onClick={() => handleContextAction('function')}>
                   Добавить Function
                 </button>
-                <button className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100" onClick={() => handleContextAction('input')}>
+                <button className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100" disabled={!diagram || !getExternalArrowFunction(diagram, selection)} onClick={() => handleContextAction('input')}>
                   Добавить внешний Input
                 </button>
-                <button className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100" onClick={() => handleContextAction('control')}>
+                <button className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100" disabled={!diagram || !getExternalArrowFunction(diagram, selection)} onClick={() => handleContextAction('control')}>
                   Добавить внешний Control
                 </button>
-                <button className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100" onClick={() => handleContextAction('output')}>
+                <button className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100" disabled={!diagram || !getExternalArrowFunction(diagram, selection)} onClick={() => handleContextAction('output')}>
                   Добавить внешний Output
                 </button>
-                <button className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100" onClick={() => handleContextAction('mechanism')}>
+                <button className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-slate-100" disabled={!diagram || !getExternalArrowFunction(diagram, selection)} onClick={() => handleContextAction('mechanism')}>
                   Добавить внешний Mechanism
                 </button>
               </>

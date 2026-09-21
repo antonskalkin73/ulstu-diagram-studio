@@ -2,21 +2,22 @@ import {
   BOUNDARY_HANDLES,
   FUNCTION_HANDLES,
 } from '@/entities/idef0/constants'
-import type { ArrowType, IDEF0Arrow, IDEF0Diagram, IDEF0Node } from '@/types/idef0'
+import type { ArrowType } from '@/types/idef0'
+import type { DiagramArrow, EditorDiagram, DiagramNode } from '@/types/diagram'
 
 export const cloneProject = <T>(value: T): T => structuredClone(value)
 
-export const getDiagramById = (diagrams: IDEF0Diagram[], diagramId: string): IDEF0Diagram | undefined =>
+export const getDiagramById = (diagrams: EditorDiagram[], diagramId: string): EditorDiagram | undefined =>
   diagrams.find((diagram) => diagram.id === diagramId)
 
-export const getNodeById = (diagram: IDEF0Diagram, nodeId: string): IDEF0Node | undefined =>
+export const getNodeById = (diagram: EditorDiagram, nodeId: string): DiagramNode | undefined =>
   diagram.nodes.find((node) => node.id === nodeId)
 
-export const getFunctionNodes = (diagram: IDEF0Diagram): IDEF0Node[] =>
+export const getFunctionNodes = (diagram: EditorDiagram): DiagramNode[] =>
   diagram.nodes.filter((node) => node.kind === 'function')
 
-export const getDiagramPath = (diagrams: IDEF0Diagram[], diagramId: string): IDEF0Diagram[] => {
-  const path: IDEF0Diagram[] = []
+export const getDiagramPath = (diagrams: EditorDiagram[], diagramId: string): EditorDiagram[] => {
+  const path: EditorDiagram[] = []
   let cursor = getDiagramById(diagrams, diagramId)
 
   while (cursor) {
@@ -27,7 +28,7 @@ export const getDiagramPath = (diagrams: IDEF0Diagram[], diagramId: string): IDE
   return path
 }
 
-export const getNextFunctionNumber = (diagram: IDEF0Diagram, parentNode?: IDEF0Node): string => {
+export const getNextFunctionNumber = (diagram: EditorDiagram, parentNode?: DiagramNode): string => {
   const functionNodes = getFunctionNodes(diagram)
   const usedNumbers = functionNodes
     .map((node) => node.nodeNumber)
@@ -57,8 +58,8 @@ export const getNextFunctionNumber = (diagram: IDEF0Diagram, parentNode?: IDEF0N
 }
 
 export const getArrowTypeFromHandles = (
-  source: IDEF0Node,
-  target: IDEF0Node,
+  source: DiagramNode,
+  target: DiagramNode,
   sourceHandle?: string | null,
   targetHandle?: string | null,
 ): ArrowType | null => {
@@ -85,9 +86,9 @@ export const getArrowTypeFromHandles = (
 }
 
 export const isArrowSemanticallyValid = (
-  source: IDEF0Node,
-  target: IDEF0Node,
-  arrowType: ArrowType,
+  source: DiagramNode,
+  target: DiagramNode,
+  arrowType: ArrowType | 'sequence',
   sourceHandle: string,
   targetHandle: string,
 ): boolean => {
@@ -130,16 +131,16 @@ export const isArrowSemanticallyValid = (
   return source.boundaryRole === arrowType && sourceHandle === BOUNDARY_HANDLES.sourceOutput && targetHandle === expectedTarget
 }
 
-export const getIncomingArrows = (diagram: IDEF0Diagram, nodeId: string, arrowType?: ArrowType): IDEF0Arrow[] =>
+export const getIncomingArrows = (diagram: EditorDiagram, nodeId: string, arrowType?: ArrowType): DiagramArrow[] =>
   diagram.arrows.filter(
     (arrow) => arrow.target === nodeId && (!arrowType || arrow.arrowType === arrowType),
   )
 
-export const getOutgoingArrows = (diagram: IDEF0Diagram, nodeId: string): IDEF0Arrow[] =>
+export const getOutgoingArrows = (diagram: EditorDiagram, nodeId: string): DiagramArrow[] =>
   diagram.arrows.filter((arrow) => arrow.source === nodeId)
 
 export const collectChildDiagramIds = (
-  diagrams: IDEF0Diagram[],
+  diagrams: EditorDiagram[],
   startDiagramId: string,
 ): string[] => {
   const children = diagrams.filter((diagram) => diagram.parentDiagramId === startDiagramId)

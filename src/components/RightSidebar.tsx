@@ -1,3 +1,5 @@
+import { flowchartShapes, type FlowchartShape } from '@/types/flowchart'
+import { getArrowLabel } from '@/features/diagram/lib/diagramGeometry'
 import { CommitInput } from './CommitInput'
 import { ArrowRightLeft, Box, GitBranchPlus } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
@@ -27,7 +29,7 @@ export const RightSidebar = () => {
         <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
           {selectedNode ? <Box className="h-4 w-4" /> : selectedArrow ? <ArrowRightLeft className="h-4 w-4" /> : <GitBranchPlus className="h-4 w-4" />}
           {selectedNode
-            ? selectedNode.kind === 'function'
+            ? selectedNode.kind !== 'boundaryPort'
               ? 'Свойства блока'
               : 'Свойства интерфейса'
             : selectedArrow
@@ -41,11 +43,18 @@ export const RightSidebar = () => {
               <span className="mb-1 block">Имя</span>
               <CommitInput
                 className="w-full rounded-lg border border-slate-300 px-3 py-2"
+                placeholder={selectedNode.kind === 'flowchart' ? flowchartShapes[selectedNode.shape ?? 'process'].title : 'Название функции'}
                 value={selectedNode.name}
                 onCommit={(value) => updateNode(selectedNode.id, { name: value })}
               />
             </label>
-            {selectedNode.kind === 'function' ? (
+            {selectedNode.kind === 'flowchart' ? (
+              <label className="block text-sm text-slate-600"><span className="mb-1 block">Фигура</span>
+                <select aria-label="Фигура" className="w-full rounded-lg border border-slate-300 px-3 py-2" value={selectedNode.shape} onChange={e => useIdef0Store.getState().setFlowchartShape(selectedNode.id, e.target.value as FlowchartShape)}>
+                  {Object.entries(flowchartShapes).map(([key, item]) => <option key={key} value={key}>{item.title}</option>)}
+                </select>
+              </label>
+            ) : selectedNode.kind === 'function' ? (
               <label className="block text-sm text-slate-600">
                 <span className="mb-1 block">Номер узла</span>
                 <input className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2" value={selectedNode.nodeNumber ?? ''} disabled />
@@ -79,7 +88,8 @@ export const RightSidebar = () => {
               <span className="mb-1 block">Подпись</span>
               <CommitInput
                 className="w-full rounded-lg border border-slate-300 px-3 py-2"
-                value={selectedArrow.label}
+                placeholder="Подпись стрелки"
+                value={diagram ? getArrowLabel(selectedArrow, diagram) : selectedArrow.label}
                 onCommit={(value) => updateArrow(selectedArrow.id, { label: value })}
               />
             </label>
@@ -92,7 +102,7 @@ export const RightSidebar = () => {
             </label>
             <label className="block text-sm text-slate-600">
               <span className="mb-1 block">Тип стрелки</span>
-              <input className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2" value={ARROW_TYPE_LABELS[selectedArrow.arrowType]} disabled />
+              <input className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2" value={selectedArrow.arrowType === 'sequence' ? 'Переход' : ARROW_TYPE_LABELS[selectedArrow.arrowType]} disabled />
             </label>
           </div>
         ) : (
@@ -106,8 +116,8 @@ export const RightSidebar = () => {
               />
             </label>
             <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
-              <div className="font-medium text-slate-900">{diagram?.isContext ? 'Контекстная диаграмма' : 'Декомпозиция'}</div>
-              <div className="mt-1">Номер узла: {diagram?.nodeNumber}</div>
+              <div className="font-medium text-slate-900">{diagram?.type === 'flowchart' ? 'Блок-схема алгоритма' : diagram?.isContext ? 'Контекстная диаграмма' : 'Декомпозиция'}</div>
+              {diagram?.type === 'idef0' ? <div className="mt-1">Номер узла: {diagram.nodeNumber}</div> : <div className="mt-1">Подписывайте ветви условия, например «Да» и «Нет». Ctrl+D — копия, Delete — удалить.</div>}
             </div>
           </div>
         )}

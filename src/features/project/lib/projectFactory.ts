@@ -2,29 +2,30 @@ import {
   BOUNDARY_NODE_SIZE,
   FUNCTION_NODE_SIZE,
 } from '@/entities/idef0/constants'
-import type { ArrowType, IDEF0Diagram, IDEF0Node, IDEF0Project } from '@/types/idef0'
+import type { ArrowType } from '@/types/idef0'
+import type { EditorDiagram, DiagramNode, EditorProject } from '@/types/diagram'
 import { createId } from '@/utils/id'
 import { getNextFunctionNumber } from '@/utils/idef0'
 
 const now = (): string => new Date().toISOString()
 
-export const createEmptyProject = (): IDEF0Project => {
+export const createEmptyProject = (type: 'idef0' | 'flowchart' = 'idef0'): EditorProject => {
   const rootDiagramId = createId('diagram')
 
   return {
     id: createId('project'),
     name: 'Новый проект',
-    version: '2.0.0',
+    version: '3.0.0',
     rootDiagramId,
     diagrams: [
       {
         id: rootDiagramId,
-        type: 'idef0',
-        title: 'Контекстная диаграмма',
-        nodeNumber: 'A-0',
+        type,
+        title: type === 'idef0' ? 'Контекстная диаграмма' : 'Блок-схема',
+        nodeNumber: type === 'idef0' ? 'A-0' : '',
         parentDiagramId: null,
         parentNodeId: null,
-        isContext: true,
+        isContext: type === 'idef0',
         nodes: [],
         arrows: [],
       },
@@ -43,14 +44,14 @@ export const createEmptyProject = (): IDEF0Project => {
 }
 
 export const createFunctionNode = (
-  diagram: IDEF0Diagram,
-  parentNode: IDEF0Node | undefined,
+  diagram: EditorDiagram,
+  parentNode: DiagramNode | undefined,
   position: { x: number; y: number },
-): IDEF0Node => ({
+): DiagramNode => ({
   id: createId('node'),
   kind: 'function',
   diagramId: diagram.id,
-  name: 'Новая функция',
+  name: '',
   nodeNumber: getNextFunctionNumber(diagram, parentNode),
   position,
   width: FUNCTION_NODE_SIZE.width,
@@ -63,18 +64,11 @@ export const createBoundaryPortNode = (
   diagramId: string,
   role: ArrowType,
   position: { x: number; y: number },
-): IDEF0Node => ({
+): DiagramNode => ({
   id: createId('node'),
   kind: 'boundaryPort',
   diagramId,
-  name:
-    role === 'input'
-      ? 'Внешний Input'
-      : role === 'control'
-        ? 'Внешний Control'
-        : role === 'mechanism'
-          ? 'Внешний Mechanism'
-          : 'Внешний Output',
+  name: '',
   boundaryRole: role,
   position,
   width: BOUNDARY_NODE_SIZE.width,
@@ -84,8 +78,8 @@ export const createBoundaryPortNode = (
 
 export const createChildDiagram = (
   parentDiagramId: string,
-  parentNode: IDEF0Node,
-): IDEF0Diagram => ({
+  parentNode: DiagramNode,
+): EditorDiagram => ({
   id: createId('diagram'),
   type: 'idef0',
   title: `Декомпозиция ${parentNode.nodeNumber ?? parentNode.name}`,

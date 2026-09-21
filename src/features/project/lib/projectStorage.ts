@@ -1,4 +1,4 @@
-import type { IDEF0Project } from '@/types/idef0'
+import type { EditorProject } from '@/types/diagram'
 import { LOCAL_STORAGE_PROJECT_KEY, LOCAL_STORAGE_PENDING_KEY } from '@/entities/idef0/constants'
 import { parseProjectJson } from './projectFile'
 
@@ -26,10 +26,10 @@ async function transact<T>(mode: IDBTransactionMode, operation: (store: IDBObjec
   })
 }
 
-export const saveProjectToStorage = async (project: IDEF0Project): Promise<void> => {
+export const saveProjectToStorage = async (project: EditorProject): Promise<void> => {
   await transact('readwrite', store => store.put(project))
 }
-export const listStoredProjects = async (): Promise<IDEF0Project[]> => {
+export const listStoredProjects = async (): Promise<EditorProject[]> => {
   const rows = await transact('readonly', store => store.getAll())
   return rows.map(row => parseProjectJson(JSON.stringify(row))).sort((a, b) => b.meta.updatedAt.localeCompare(a.meta.updatedAt))
 }

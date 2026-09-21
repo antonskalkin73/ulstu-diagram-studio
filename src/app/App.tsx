@@ -11,9 +11,11 @@ import { useWorkspace } from '@/features/project/lib/workspace'
 import { createEmptyProject } from '@/features/project/lib/projectFactory'
 import { createId } from '@/utils/id'
 import { diagramCatalog } from '@/types/project'
-import type { IDEF0Project } from '@/types/idef0'
+import type { EditorProject } from '@/types/diagram'
 
 const DiagramEditor = lazy(() => import('@/features/diagram/ui/DiagramEditor').then(module => ({ default: module.DiagramEditor })))
+
+const FlowchartEditor = lazy(() => import('@/features/flowchart/FlowchartEditor').then(module => ({ default: module.FlowchartEditor })))
 
 const editable = (target: EventTarget | null) => target instanceof HTMLElement && (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable)
 
@@ -21,11 +23,11 @@ export default function App() {
   const state = useIdef0Store()
   const workspace = useWorkspace(useShallow(s => ({ tabs: s.tabs, left: s.left, right: s.right, toggleLeft: s.toggleLeft, toggleRight: s.toggleRight })))
   const [screen, setScreen] = useState<'home' | 'editor'>('home')
-  const [projects, setProjects] = useState<IDEF0Project[]>([])
+  const [projects, setProjects] = useState<EditorProject[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saveError, setSaveError] = useState('')
-  const [savedProject, setSavedProject] = useState<IDEF0Project | null>(null)
+  const [savedProject, setSavedProject] = useState<EditorProject | null>(null)
   const [chooser, setChooser] = useState<'project' | 'diagram' | null>(null)
   const [problems, setProblems] = useState(false)
   const [exporting, setExporting] = useState(false)
@@ -36,7 +38,7 @@ export default function App() {
   const current = project.diagrams.find(d => d.id === state.currentDiagramId)
   const tabs = (workspace.tabs[project.id] ?? []).filter(id => project.diagrams.some(d => d.id === id))
 
-  const enqueueSave = (snapshot: IDEF0Project) => {
+  const enqueueSave = (snapshot: EditorProject) => {
     queue.current = queue.current.catch(() => {}).then(() => saveProjectToStorage(snapshot)).then(() => {
       setSavedProject(snapshot)
       setSaveError('')
@@ -60,7 +62,7 @@ export default function App() {
     if (next.project !== previous.project && activeProject.current === next.project.id) enqueueSave(next.project)
   }), [])
 
-  const openProject = (item: IDEF0Project) => {
+  const openProject = (item: EditorProject) => {
     activeProject.current = null
     state.setProject(item)
     activeProject.current = item.id
@@ -156,7 +158,7 @@ export default function App() {
       </section>
       <div className="section-heading">Ваши проекты <span>{projects.length}</span></div>
       {loading ? <p role="status">Загрузка проектов…</p> : projects.length === 0 ? <div className="empty-projects"><GitBranch size={28} /><h2>Здесь появятся ваши проекты</h2><p>Создайте первый проект или откройте существующий JSON-файл.</p></div> : <div className="project-grid">{projects.map(item => <article className="project-card" key={item.id}>
-        <button className="project-card-open" onClick={() => openProject(item)}><div className="card-preview"><GitBranch size={36} /><span>IDEF0</span></div><h2>{item.name || 'Без названия'}</h2><p>{item.diagrams.length} диаграмм · {new Date(item.meta.updatedAt).toLocaleDateString('ru-RU')}</p></button>
+        <button className="project-card-open" onClick={() => openProject(item)}><div className="card-preview"><GitBranch size={36} /><span>{[...new Set(item.diagrams.map(d => d.type === 'idef0' ? 'IDEF0' : 'Блок-схема'))].join(' · ')}</span></div><h2>{item.name || 'Без названия'}</h2><p>{item.diagrams.length} диаграмм · {new Date(item.meta.updatedAt).toLocaleDateString('ru-RU')}</p></button>
         <button className="card-delete icon-button" aria-label={`Удалить проект ${item.name}`} onClick={async () => {
           if (!window.confirm(`Удалить локальный проект «${item.name}»? Это действие нельзя отменить.`)) return
           try { await deleteStoredProject(item.id); setProjects(await listStoredProjects()) } catch (e) { setError(String(e)) }
@@ -164,17 +166,18 @@ export default function App() {
       </article>)}</div>}
       <footer><Database size={15} /> Проекты хранятся в этом браузере. Скачивайте JSON, чтобы переносить их и сохранять резервные копии.</footer>
     </main> : <>
-      <TopBar name={project.name} onName={state.setProjectName} status={exporting ? 'Подготовка экспорта…' : saveError ? 'Не удалось сохранить' : savedProject === project ? 'Сохранено в браузере' : 'Сохранение…'} onHome={() => void goHome()} onSave={() => downloadProjectJson(project)} onExport={type => void exportDiagram(type)} onUndo={state.undo} onRedo={state.redo} canUndo={state.past.length > 0} canRedo={state.future.length > 0} onLeft={workspace.toggleLeft} onRight={workspace.toggleRight} />
+      <TopBar name={project.name} onName={state.setProjectName} status={exporting ? 'Подготовка экспорта…' : saveError ? 'Не удалось сохранить' : savedProject === project ? 'Сохранено в браузере' : 'Сохранение…'} onHome={() => void goHome()} onSave={() => downloadProjectJson(project)} onExport={type => void exportDiagram(type)} onUndo={state.undo} onRedo={state.redo} canUndo={state.past.length > 0} canRedo={state.future.length > 0} onLeft={workspace.toggleLeft} onRight={workspace.toggleRight}>
+        <div className="tabs" role="tablist" aria-label="Открытые диаграммы">{tabs.map(id => {
+            const diagram = project.diagrams.find(d => d.id === id)!
+            return <div className={`tab ${id === state.currentDiagramId ? 'active' : ''}`} key={id}><button role="tab" aria-selected={id === state.currentDiagramId} onClick={() => openDiagram(id)}><span>{diagram.type === 'idef0' ? 'IDEF0' : 'Блок-схема'}</span>{diagram.title}</button><button aria-label={`Закрыть вкладку ${diagram.title}`} onClick={() => closeTab(id)}><X size={13} /></button></div>
+          })}<button className="icon-button" onClick={() => setChooser('diagram')} aria-label="Новая диаграмма"><Plus size={17} /></button></div>
+      </TopBar>
       <div className="editor-body">
         {workspace.left && <LeftSidebar diagrams={project.diagrams} activeId={state.currentDiagramId} rootId={project.rootDiagramId} onOpen={openDiagram} onAdd={() => setChooser('diagram')} onDelete={id => {
           if (window.confirm('Удалить диаграмму и все её декомпозиции? Действие можно отменить.')) state.deleteDiagram(id)
         }} />}
         <main className="editor-main">
-          <div className="tabs" role="tablist" aria-label="Открытые диаграммы">{tabs.map(id => {
-            const diagram = project.diagrams.find(d => d.id === id)!
-            return <div className={`tab ${id === state.currentDiagramId ? 'active' : ''}`} key={id}><button role="tab" aria-selected={id === state.currentDiagramId} onClick={() => openDiagram(id)}><span>IDEF0</span>{diagram.title}</button><button aria-label={`Закрыть вкладку ${diagram.title}`} onClick={() => closeTab(id)}><X size={13} /></button></div>
-          })}<button className="icon-button" onClick={() => setChooser('diagram')} aria-label="Новая диаграмма"><Plus size={17} /></button></div>
-          {current ? <Suspense fallback={<div className="no-diagram" role="status">Загрузка редактора…</div>}><DiagramEditor key={project.id + current.id} /></Suspense> : <div className="no-diagram"><Shapes size={40} /><h2>Откройте диаграмму из дерева</h2><p>Закрытые вкладки остаются в проекте.</p><button className="button" onClick={() => openDiagram(project.rootDiagramId)}>Открыть корневую диаграмму</button></div>}
+          {current ? <Suspense fallback={<div className="no-diagram" role="status">Загрузка редактора…</div>}>{current.type === 'flowchart' ? <FlowchartEditor key={project.id + current.id} /> : <DiagramEditor key={project.id + current.id} />}</Suspense> : <div className="no-diagram"><Shapes size={40} /><h2>Откройте диаграмму из дерева</h2><p>Закрытые вкладки остаются в проекте.</p><button className="button" onClick={() => openDiagram(project.rootDiagramId)}>Открыть корневую диаграмму</button></div>}
           <div className="problems-panel"><button className="problems-toggle" onClick={() => setProblems(!problems)}>{problems ? '▾' : '▸'} Проверка модели <span>{state.issues.filter(i => i.severity === 'error').length} ошибок</span><span>{state.issues.filter(i => i.severity === 'warning').length} предупреждений</span></button>
             {problems && <div className="problems-list">{state.issues.length === 0 ? <p>Проблем не найдено.</p> : state.issues.map(issue => <button key={issue.id} onClick={() => {
               openDiagram(issue.diagramId)
@@ -188,10 +191,11 @@ export default function App() {
     {chooser && <div className="modal-backdrop" onClick={() => setChooser(null)}><section className="type-dialog" role="dialog" aria-modal="true" aria-label="Выбор типа диаграммы" onClick={e => e.stopPropagation()} onKeyDown={e => { if (e.key === 'Escape') setChooser(null) }}>
       <div className="dialog-heading"><div><div className="eyebrow">НОВАЯ ДИАГРАММА</div><h2>Что будем проектировать?</h2></div><button className="icon-button" aria-label="Закрыть" autoFocus onClick={() => setChooser(null)}><X size={20} /></button></div>
       {diagramCatalog.map(kind => <button className="type-option" key={kind.type} disabled={!kind.available} onClick={() => {
-        if (chooser === 'project') openProject(createEmptyProject()); else state.addDiagram()
+        if (kind.type === 'er') return
+        if (chooser === 'project') openProject(createEmptyProject(kind.type)); else state.addDiagram(kind.type)
         setChooser(null)
       }}><span className="type-symbol">{kind.type === 'er' ? <Database /> : kind.type === 'flowchart' ? <Shapes /> : <GitBranch />}</span><span><strong>{kind.title}</strong><small>{kind.description}</small></span><span className="type-badge">{kind.available ? 'Создать →' : 'Скоро'}</span></button>)}
-      <p className="dialog-note">Блок-схемы и ERD появятся позже. Сейчас доступен редактор IDEF0.</p>
+      <p className="dialog-note">В одном проекте можно сочетать IDEF0 и блок-схемы. Редактор ERD появится позже.</p>
     </section></div>}
   </div>
 }

@@ -1,4 +1,5 @@
-import type { IDEF0Project, ValidationIssue } from '@/types/idef0'
+import { validateFlowchart } from '@/features/flowchart/validateFlowchart'
+import type { EditorProject, ValidationIssue } from '@/types/diagram'
 import {
   getDiagramById,
   getIncomingArrows,
@@ -7,10 +8,11 @@ import {
   isArrowSemanticallyValid,
 } from '@/utils/idef0'
 
-export const validateProject = (project: IDEF0Project): ValidationIssue[] => {
+export const validateProject = (project: EditorProject): ValidationIssue[] => {
   const issues: ValidationIssue[] = []
 
   project.diagrams.forEach((diagram) => {
+    if (diagram.type === 'flowchart') { issues.push(...validateFlowchart(diagram)); return }
     diagram.nodes.forEach((node) => {
       if (node.kind === 'function') {
         if (!node.name.trim()) {
