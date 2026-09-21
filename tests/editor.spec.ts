@@ -8,7 +8,7 @@ test('projects, tabs, drag undo, persistence, export and responsive workspace', 
   await page.screenshot({ path: 'test-results/home.png', fullPage: true })
   await page.getByRole('button', { name: 'Новый проект', exact: true }).click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog.getByRole('button', { name: /Блок-схема/ })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: /Блок-схема/ })).toBeEnabled()
   await expect(dialog.getByRole('button', { name: /ERD/ })).toBeDisabled()
   await page.screenshot({ path: 'test-results/chooser.png', fullPage: true })
   await dialog.getByRole('button', { name: /IDEF0/ }).click()
@@ -19,9 +19,9 @@ test('projects, tabs, drag undo, persistence, export and responsive workspace', 
   await input.press('Enter')
   await expect(input).toHaveValue('Обработать заказ')
   await page.getByRole('button', { name: 'Отменить', exact: true }).click()
-  await expect(input).toHaveValue('Новая функция')
+  await expect(input).toHaveValue('')
   await page.getByRole('button', { name: 'Повторить', exact: true }).click()
-  const node = page.locator('.react-flow__node').first()
+  const node = page.locator('.react-flow__node-idef0Function').first()
   const before = await node.boundingBox()
   if (!before) throw new Error('No node bounds')
   await page.mouse.move(before.x + 20, before.y + 15)
@@ -105,4 +105,83 @@ test('legacy draft is migrated and invalid imports preserve the active project',
   await expect(page.getByRole('heading', { name: 'Откройте диаграмму из дерева' })).toBeVisible()
   await page.getByRole('button', { name: 'Открыть корневую диаграмму' }).click()
   await expect(page.getByRole('tab')).toHaveCount(1)
+})
+
+test('selection stays stable when adding, switching and clearing multiple nodes', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Новый проект', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: /IDEF0/ }).click()
+  await page.getByRole('button', { name: 'Создать контекстную диаграмму' }).click()
+  const node = page.locator('.react-flow__node-idef0Function').first()
+  await node.click({ position: { x: 20, y: 15 } })
+  for (const role of ['Input', 'Control', 'Output', 'Mechanism']) {
+    await page.getByRole('button', { name: role, exact: true }).click()
+    await expect(page.locator('.react-flow__edge.selected')).toHaveCount(1)
+  }
+  await expect(page.locator('.react-flow__node-idef0Function')).toHaveCount(1)
+  await expect(page.locator('.react-flow__node-boundaryPort')).toHaveCount(4)
+  await node.click({ position: { x: 20, y: 15 } })
+  await page.locator('.react-flow__pane').click({ position: { x: 15, y: 15 } })
+  await expect(page.locator('.react-flow__node.selected')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Отменить', exact: true }).click()
+  await page.getByRole('button', { name: 'Повторить', exact: true }).click()
+  expect(errors).toEqual([])
+})
+
+test('edge zones create IDEF0 arrows and new names are placeholders', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Новый проект', exact: true }).click()
+  await page.getByRole('dialog').getByRole('button', { name: /IDEF0/ }).click()
+  await page.getByRole('button', { name: 'Создать контекстную диаграмму' }).click()
+  const input = page.getByRole('textbox', { name: 'Имя функции' })
+  await expect(input).toHaveValue('')
+  await expect(input).toHaveAttribute('placeholder', 'Название функции')
+  await input.click()
+  await input.pressSequentially('П')
+  await expect(input).toHaveValue('П')
+  await input.pressSequentially('иццерия')
+  await input.press('Enter')
+  await expect(page.locator('header [role=tablist]')).toBeVisible()
+  await expect(page.locator('.idef0-sheet')).toHaveCount(0)
+  const fn = page.locator('.react-flow__node-idef0Function')
+  const draw = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
+    await page.mouse.move(from.x, from.y)
+    await page.mouse.down()
+    await page.mouse.move(to.x, to.y, { steps: 15 })
+    await page.mouse.up()
+  }
+  const center = async (locator: ReturnType<typeof page.locator>) => {
+    const box = await locator.boundingBox()
+    if (!box) throw new Error('Missing bounds')
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+  }
+  for (const role of ['Вход', 'Управление', 'Механизм']) {
+    await draw(await center(page.getByRole('button', { name: `Граница: ${role}`, exact: true })), await center(fn))
+  }
+  await expect(page.locator('.react-flow__edge')).toHaveCount(3)
+  await draw(await center(fn.locator('[data-handleid="source-output"]')), await center(page.getByRole('button', { name: 'Граница: Выход', exact: true })))
+  await expect(page.locator('.react-flow__edge')).toHaveCount(4)
+  const labels = page.getByRole('textbox', { name: 'Подпись стрелки на холсте', exact: true })
+  const names = ['Ингредиенты', 'Рецептура', 'Повар', 'Пицца']
+  for (let i = 0; i < 4; i++) {
+    await expect(labels.nth(i)).toHaveValue('')
+    await labels.nth(i).fill(names[i]!)
+    await labels.nth(i).press('Enter')
+  }
+  await page.screenshot({ path: 'test-results/idef0-zones.png', fullPage: true })
+  await page.locator('.react-flow__controls-zoomout').click()
+  const canvas = await page.locator('.canvas-area').boundingBox()
+  if (!canvas) throw new Error('Missing canvas')
+  for (const anchor of await page.locator('.react-flow__node-boundaryPort').all()) {
+    const box = await anchor.boundingBox()
+    if (!box) throw new Error('Missing anchor')
+    const distances = [Math.abs(box.x + box.width / 2 - canvas.x - 18), Math.abs(box.x + box.width / 2 - canvas.x - canvas.width + 18), Math.abs(box.y + box.height / 2 - canvas.y - 18), Math.abs(box.y + box.height / 2 - canvas.y - canvas.height + 18)]
+    expect(Math.min(...distances)).toBeLessThan(2)
+  }
+  expect(errors).toEqual([])
 })
